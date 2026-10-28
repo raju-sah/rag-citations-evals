@@ -1,0 +1,1 @@
+run_name,date,config,chunk_size,retrieval_mode,rerank,k,recall@5,mrr,ndcg@5,faithfulness,answer_relevancy,correctness,cite_precision,cite_recall,refusal_rate,latency_s,cost_per_query_usd,notes

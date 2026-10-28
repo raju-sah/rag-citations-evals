@@ -1,0 +1,22 @@
+# Baseline config — copy & change ONE field per ablation.
+run_name: baseline
+corpus_dir: data/raw
+chunk:
+  size_tokens: 500
+  overlap_tokens: 60
+embedding_model: BAAI/bge-small-en-v1.5
+retrieval:
+  mode: hybrid        # dense | bm25 | hybrid
+  top_k_candidates: 20
+  rrf_k: 60
+rerank:
+  enabled: true
+  model: BAAI/bge-reranker-v2-m3
+  top_k: 5
+llm:
+  provider: gemini    # gemini | openai | anthropic | ollama
+  model: TBD
+  temperature: 0.0
+eval:
+  golden_set: evals/golden/golden.jsonl
+  judge_model: TBD

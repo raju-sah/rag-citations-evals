@@ -1,0 +1,33 @@
+[project]
+name = "ragcite"
+version = "0.1.0"
+description = "Hybrid RAG with sentence-level citations and an eval harness"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+    "numpy",
+]
+
+[project.optional-dependencies]
+rag = [
+    "sentence-transformers",
+    "faiss-cpu",
+    "rank-bm25",
+    "pypdf",
+    "tiktoken",
+]
+llm = ["google-genai", "openai"]
+evals = ["ragas", "pandas"]
+ui = ["streamlit"]
+dev = ["pytest", "ruff"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
