@@ -9,6 +9,9 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from ragcite.citations import validate_citations
 from ragcite.generate import answer_with_citations
@@ -117,11 +120,33 @@ with tab_qa:
         "What does the Consumer Protection Act say about space travel liability and passenger rockets?",
     ]
 
-    selected_example = st.selectbox("Or choose an example query:", [""] + example_queries, index=0)
-    query_input = st.text_input(
+    # Initialize query state
+    if "query_text" not in st.session_state:
+        st.session_state["query_text"] = ""
+
+    def apply_chip():
+        chosen = st.session_state.get("chip_selection")
+        if chosen:
+            st.session_state["query_text"] = chosen
+
+    # Expanding textarea for long or multi-clause legal questions
+    query_input = st.text_area(
         "Enter your legal question:",
-        value=selected_example if selected_example else "",
-        placeholder="e.g. What does Article 17 say about freedom of expression?",
+        key="query_text",
+        height=100,
+        placeholder="Type or paste any legal query in English or Nepali (field expands for long questions)...",
+        help="Text area expands automatically when questions are long.",
+    )
+
+    # Chip-style example questions below the textarea
+    st.markdown("💡 **Suggested questions (click to fill):**")
+    st.pills(
+        "Suggested questions",
+        options=example_queries,
+        key="chip_selection",
+        on_change=apply_chip,
+        label_visibility="collapsed",
+        wrap=True,
     )
 
     retriever = get_retriever()
@@ -131,7 +156,20 @@ with tab_qa:
             "Please ensure `data/processed/chunks.jsonl` is indexed."
         )
 
-    if st.button("Run RAG Pipeline", type="primary", disabled=(retriever is None or not query_input.strip())):
+    btn_col1, btn_col2 = st.columns([1, 4])
+    with btn_col1:
+        run_submitted = st.button(
+            "Run RAG Pipeline",
+            type="primary",
+            disabled=(retriever is None or not query_input.strip()),
+        )
+    with btn_col2:
+        if st.button("Clear Question"):
+            st.session_state["query_text"] = ""
+            st.session_state["chip_selection"] = None
+            st.rerun()
+
+    if run_submitted:
         with st.spinner("Retrieving candidates & generating cited answer..."):
             # 1. Retrieve
             candidates = retriever.retrieve(
@@ -214,7 +252,7 @@ with tab_eval:
     if csv_path.exists():
         df = pd.read_csv(csv_path)
         if not df.empty and len(df) > 0:
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width="stretch")
             # High-level metrics view
             st.markdown("#### Primary Headline Metrics")
             cols = st.columns(min(len(df.columns), 4))
