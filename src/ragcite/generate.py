@@ -147,19 +147,29 @@ class LLMClient:
             )
 
         if self.provider == "gemini":
-            try:
-                from google import genai
+            from google import genai
 
-                client = genai.Client(api_key=self.api_key)
-                response = client.models.generate_content(
-                    model=self.model,
-                    contents=prompt,
-                    config={"system_instruction": system, "temperature": self.temperature},
-                )
-                return response.text or ""
-            except Exception as err:
-                logger.error("Gemini API call failed: %s", err)
-                raise
+            client = genai.Client(api_key=self.api_key)
+            models_to_try = [self.model]
+            for candidate in ("gemini-3-flash-preview", "gemini-3.5-flash"):
+                if candidate not in models_to_try:
+                    models_to_try.append(candidate)
+
+            last_err = None
+            for model_name in models_to_try:
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config={"system_instruction": system, "temperature": self.temperature},
+                    )
+                    return response.text or ""
+                except Exception as err:  # noqa: BLE001
+                    logger.warning("Gemini model %s failed: %s; trying next fallback", model_name, err)
+                    last_err = err
+
+            logger.error("All Gemini model attempts failed: %s", last_err)
+            raise last_err
 
         elif self.provider == "groq":
             try:
@@ -204,7 +214,7 @@ def answer_with_citations(
     question: str,
     sources: Sequence[RetrievedCandidate],
     provider: str = "gemini",
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-3-flash-preview",
     temperature: float = 0.0,
     cache_dir: str | Path = "data/cache/llm_cache",
     api_key: str | None = None,

@@ -113,11 +113,11 @@ with tab_qa:
     )
 
     example_queries = [
-        "What fundamental freedoms are guaranteed under Article 17 of the Constitution?",
-        "नेपालको संविधानको धारा १६ मा सम्मानपूर्वक बाँच्न पाउने हक सम्बन्धी के व्यवस्था छ?",
-        "Under the Labour Act 2017, what are the mandatory types of employment contracts?",
-        "What penalties apply to a public servant convicted of taking bribery?",
-        "What does the Consumer Protection Act say about space travel liability and passenger rockets?",
+        "What freedoms are guaranteed to citizens under Article 17 of the Constitution of Nepal?",
+        "नेपालको संविधानको धारा १६ मा सम्मानपूर्वक बाँच्न पाउने हक सम्बन्धमा के व्यवस्था गरिएको छ?",
+        "Under what conditions does the Constitution prohibit capital punishment?",
+        "संविधानको धारा ३१ अनुसार शिक्षा सम्बन्धी हकमा के के पर्दछन्?",
+        "What does the Constitution of Nepal state regarding the licensing of cryptocurrency exchanges and token staking?",
     ]
 
     # Initialize query state

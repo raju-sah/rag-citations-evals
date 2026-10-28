@@ -13,6 +13,14 @@ query → hybrid top-20 (RRF) → cross-encoder rerank → top-5 → LLM answer 
       → citation validator → eval harness → experiments/ablations.csv
 ```
 
+## Demo
+
+The interactive Streamlit UI features:
+1. **Interactive Q&A Demo:** Expandable textarea for long, multi-clause legal questions, clickable suggestion chips for instant question population, sentence-level citation enforcement `[n]`, validation badges (`status-pill-ok` / `status-pill-warn`), and interactive retrieved sources drawer.
+2. **Ablations & Metrics Dashboard:** Live data table tracking Recall@5, MRR, nDCG@5, Faithfulness, Citation Precision/Recall across all chunking, retrieval, and reranking ablations.
+
+![Interactive Legal Assistant with Sentence-Level Citations](experiments/browser_test_proof.png)
+
 ## Results
 
 The evaluation suite runs across 8 core configurations + 1 prompt variant against the stratified Nepal Law golden dataset (1,712 chunks across 1,389 legislative pages):
