@@ -53,11 +53,17 @@ def run_browser_tests():
             return True
 
         # Test 1: Initial load
-        print("\n--- Test 1: Initial Load & App Header ---")
+        print("\n--- Test 1: Initial Load & App Header Above Tabs ---")
         check_no_exceptions("Initial Load")
         title_text = page.locator("h3").first.inner_text()
         print(f"  Found title: '{title_text}'")
         assert "Nepal Legal Assistant" in title_text
+
+        # Verify header is placed before tabs in DOM order
+        header_y = page.locator("h3").first.bounding_box()["y"]
+        tabs_y = page.locator("[role='tablist']").bounding_box()["y"]
+        assert header_y < tabs_y, f"Header (y={header_y}) should be above tabs (y={tabs_y})!"
+        print(f"  ✓ Confirmed: Header is above tabs (header_y={header_y:.1f} < tabs_y={tabs_y:.1f})")
 
         # Test 2: Chip Click -> Textarea Fill & Submit Button Enabled
         print("\n--- Test 2: Chip Click & Textarea Population ---")
@@ -67,7 +73,7 @@ def run_browser_tests():
 
         # Click the first chip
         q1_button.first.click()
-        time.sleep(2)
+        time.sleep(1.5)
         check_no_exceptions("After Chip 1 Click")
 
         textarea = page.locator("textarea").first
@@ -89,7 +95,7 @@ def run_browser_tests():
         assert old_clear_btn.count() == 0, "Old 'Clear Question' button still present!"
         print("  ✓ Confirmed: External 'Run RAG Pipeline' and 'Clear Question' buttons removed.")
 
-        # Test 3.5: Instant Conversational Greeting ('hi there')
+        # Test 3.5: Instant Conversational Greeting ('hi there') & Question Chip Verification
         print("\n--- Test 3.5: Instant Conversational Greeting ('hi there') ---")
         textarea = page.locator("textarea").first
         textarea.fill("hi there")
@@ -100,7 +106,37 @@ def run_browser_tests():
         page.wait_for_selector(".status-pill-ok:has-text('Instant Conversational Assistant')", timeout=5000)
         elapsed_hi = time.perf_counter() - t0
         check_no_exceptions("After 'hi there' Submission")
-        print(f"  ✓ 'hi there' answered in {elapsed_hi:.2f}s (browser round-trip) with Instant Conversational badge!")
+        print(f"  ✓ 'hi there' answered in {elapsed_hi:.2f}s with Instant Conversational badge!")
+
+        # Verify suggested questions are now HIDDEN after submission
+        assert page.locator("button:has-text('What freedoms are guaranteed')").count() == 0, (
+            "Suggested questions pills should be hidden after asking a question!"
+        )
+        print("  ✓ Confirmed: Suggested questions section is hidden after submission.")
+
+        # Verify active question chip is displayed above the response
+        q_chip = page.locator(".user-query-chip")
+        assert q_chip.count() > 0, "Active question chip not found above response!"
+        assert "hi there" in q_chip.first.inner_text()
+        print(f"  ✓ Active question chip rendered: '{q_chip.first.inner_text()}'")
+
+        # Verify '↺ New Question' button is visible
+        reset_btn = page.locator("button:has-text('New Question')")
+        assert reset_btn.count() > 0, "Reset button ('New Question') not found!"
+        print("  ✓ '↺ New Question' button is present.")
+
+        # Test 3.6: Reset via '↺ New Question' & Verify Suggestions Reappear
+        print("\n--- Test 3.6: Reset via '↺ New Question' ---")
+        reset_btn.first.click()
+        time.sleep(1.5)
+        check_no_exceptions("After Clicking 'New Question'")
+        assert page.locator("button:has-text('What freedoms are guaranteed')").count() > 0, (
+            "Suggested questions pills should reappear after clicking 'New Question'!"
+        )
+        assert page.locator(".user-query-chip").count() == 0, (
+            "Question chip should be removed after clicking 'New Question'!"
+        )
+        print("  ✓ Suggestions reappeared and previous answer/question chip cleared successfully.")
 
         # Test 4: Chip Click for Nepali Query & Execution via Embedded Submit Button
         print("\n--- Test 4: Nepali Query Selection & Pipeline Execution ---")
@@ -108,7 +144,7 @@ def run_browser_tests():
         assert nepali_chip.count() > 0, "Nepali suggestion chip not found!"
         print(f"  Clicking Nepali chip: '{nepali_chip.first.inner_text()[:60]}...'")
         nepali_chip.first.click()
-        time.sleep(2)
+        time.sleep(1.5)
         check_no_exceptions("After Nepali Chip Click")
 
         print("  Clicking embedded submit button inside textarea...")
@@ -121,7 +157,16 @@ def run_browser_tests():
         time.sleep(1)
         check_no_exceptions("After RAG Pipeline Execution")
 
-        # Verify citation status badge is .status-pill-ok (not refusal) and .cite-badge pills rendered
+        # Verify suggestions hidden and Nepali question chip displayed
+        assert page.locator("button:has-text('What freedoms are guaranteed')").count() == 0, (
+            "Suggested questions should be hidden during active Nepali query!"
+        )
+        q_chip = page.locator(".user-query-chip")
+        assert q_chip.count() > 0, "Question chip not found for Nepali query!"
+        assert "नेपालको संविधानको धारा १६" in q_chip.first.inner_text()
+        print(f"  ✓ Nepali question chip: '{q_chip.first.inner_text()[:50]}...'")
+
+        # Verify citation status badge is .status-pill-ok and .cite-badge pills rendered
         status_pill = page.locator(".status-pill-ok:has-text('sentences cited')")
         assert status_pill.count() > 0, "Expected cited Nepali answer (.status-pill-ok), not refusal!"
         print(f"  ✓ Validation badge: '{status_pill.first.inner_text()}'")
@@ -157,12 +202,18 @@ def run_browser_tests():
         time.sleep(1)
         check_no_exceptions("After Switching Back to Tab 1")
 
+        # Reset query to show suggestion chips
+        reset_btn = page.locator("button:has-text('New Question')")
+        if reset_btn.count() > 0:
+            reset_btn.first.click()
+            time.sleep(1.5)
+
         # Click the cryptocurrency unanswerable refusal chip
         unans_chip = page.locator("button:has-text('cryptocurrency exchanges')")
         assert unans_chip.count() > 0, "Unanswerable query chip not found!"
         print(f"  Clicking refusal chip: '{unans_chip.first.inner_text()[:60]}...'")
         unans_chip.first.click()
-        time.sleep(2)
+        time.sleep(1.5)
 
         print("  Clicking embedded submit button inside textarea for refusal test...")
         submit_btn = page.locator("button[data-testid='stChatInputSubmitButton']")

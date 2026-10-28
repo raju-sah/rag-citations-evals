@@ -124,6 +124,58 @@ st.markdown(
         background-color: rgba(255, 255, 255, 0.1) !important;
         color: rgba(255, 255, 255, 0.25) !important;
     }
+
+    /* Pinned chat input dock at the bottom of the viewport in Tab 1 */
+    div[data-testid="stTabPanel"] div[data-testid="stChatInput"] {
+        position: fixed !important;
+        bottom: 24px !important;
+        left: calc(var(--sidebar-width, 300px) + (100vw - var(--sidebar-width, 300px)) / 2) !important;
+        transform: translateX(-50%) !important;
+        width: min(860px, calc(100vw - 360px)) !important;
+        z-index: 1000 !important;
+        background-color: #212126 !important;
+        border-radius: 18px !important;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+    }
+
+    @media (max-width: 992px) {
+        div[data-testid="stTabPanel"] div[data-testid="stChatInput"] {
+            left: 50% !important;
+            width: calc(100vw - 32px) !important;
+        }
+    }
+
+    /* Ensure scrollable content in Tab 1 has padding at bottom so nothing is hidden behind input dock */
+    div[data-testid="stTabPanel"] {
+        padding-bottom: 140px !important;
+    }
+
+    /* User query chip badge above the answer */
+    .user-query-container {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+        margin-top: 4px;
+    }
+    .user-query-chip {
+        background: #232530;
+        color: #f3f4f6;
+        padding: 9px 18px;
+        border-radius: 20px;
+        font-size: 0.98rem;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid #3f4154;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        max-width: 100%;
+        word-break: break-word;
+    }
+    .user-query-icon {
+        font-size: 1.1rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -163,6 +215,13 @@ def _render_with_citation_badges(text: str) -> str:
     )
 
 
+# Page header placed permanently above tabs
+st.subheader("Nepal Legal Assistant with Sentence-Level Citations")
+st.caption(
+    "Ask a legal question in English or Nepali. The pipeline retrieves relevant acts, "
+    "enforces sentence-level citations `[n]`, and validates citation provenance."
+)
+
 tab_qa, tab_eval = st.tabs(["⚖️ Interactive Q&A Demo", "📊 Ablations & Metrics Dashboard"])
 
 with st.sidebar:
@@ -190,12 +249,6 @@ with st.sidebar:
 # TAB 1: Interactive Q&A Demo
 # -------------------------------------------------------------
 with tab_qa:
-    st.subheader("Nepal Legal Assistant with Sentence-Level Citations")
-    st.caption(
-        "Ask a legal question in English or Nepali. The pipeline retrieves relevant acts, "
-        "enforces sentence-level citations `[n]`, and validates citation provenance."
-    )
-
     example_queries = [
         "What freedoms are guaranteed to citizens under Article 17 of the Constitution of Nepal?",
         "नेपालको संविधानको धारा १६ मा सम्मानपूर्वक बाँच्न पाउने हक सम्बन्धमा के व्यवस्था गरिएको छ?",
@@ -215,6 +268,11 @@ with tab_qa:
         if chosen:
             st.session_state["query_input_val"] = chosen
 
+    def reset_query():
+        st.session_state["last_result"] = None
+        st.session_state["query_input_val"] = ""
+        st.session_state["chip_selection"] = None
+
     retriever = get_retriever()
     _ = get_cached_reranker()
     if retriever is None:
@@ -223,24 +281,24 @@ with tab_qa:
             "Please ensure `data/processed/chunks.jsonl` is indexed."
         )
 
-    # Embedded input container with submit button inside the textarea
-    with st.container():
-        submitted_query = st.chat_input(
-            "Enter your legal question in English or Nepali...",
-            key="query_input_val",
-            disabled=(retriever is None),
-        )
-
-    # Chip-style example questions below the input field
-    st.markdown("💡 **Suggested questions (click to fill):**")
-    st.pills(
-        "Suggested questions",
-        options=example_queries,
-        key="chip_selection",
-        on_change=apply_chip,
-        label_visibility="collapsed",
-        wrap=True,
+    # Embedded input container pinned at the bottom of the page
+    submitted_query = st.chat_input(
+        "Enter your legal question in English or Nepali...",
+        key="query_input_val",
+        disabled=(retriever is None),
     )
+
+    # Chip-style example questions - visible only before a question has been asked
+    if st.session_state.get("last_result") is None and not submitted_query:
+        st.markdown("💡 **Suggested questions (click to fill):**")
+        st.pills(
+            "Suggested questions",
+            options=example_queries,
+            key="chip_selection",
+            on_change=apply_chip,
+            label_visibility="collapsed",
+            wrap=True,
+        )
 
     if submitted_query:
         t_pipeline_start = time.perf_counter()
@@ -323,6 +381,28 @@ with tab_qa:
         gen_result = res["gen_result"]
         val_report = res["val_report"]
         total_latency_s = res.get("total_latency_s", gen_result.latency_s)
+
+        # Active question chip with reset action
+        col_q, col_rst = st.columns([0.80, 0.20], vertical_alignment="center")
+        with col_q:
+            st.markdown(
+                f"""
+                <div class="user-query-container">
+                    <div class="user-query-chip">
+                        <span class="user-query-icon">💬</span>
+                        <span><b>Question:</b> {res['question']}</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with col_rst:
+            st.button(
+                "↺ New Question",
+                key="btn_reset_query",
+                on_click=reset_query,
+                help="Clear answer and show suggestion chips",
+            )
 
         # Render citation validation status
         if is_conv:
