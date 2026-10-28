@@ -61,23 +61,37 @@ st.markdown(
         display: inline-block;
         margin-bottom: 12px;
     }
-    /* Claude-style embedded chat input */
+    /* Claude-style embedded chat input (seamless borderless design) */
     div[data-testid="stChatInput"] {
         border-radius: 18px !important;
-        border: 1.5px solid rgba(255, 255, 255, 0.15) !important;
-        background-color: rgba(30, 30, 36, 0.75) !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25) !important;
+        border: none !important;
+        outline: none !important;
+        background-color: #212126 !important;
+        box-shadow: none !important;
         padding: 4px 8px !important;
         margin-bottom: 12px !important;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
     div[data-testid="stChatInput"]:focus-within {
-        border-color: #d97706 !important;
-        box-shadow: 0 4px 24px rgba(217, 119, 6, 0.25) !important;
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+    div[data-testid="stChatInput"] > div {
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
     }
     div[data-testid="stChatInput"] textarea {
         font-size: 1.02rem !important;
         line-height: 1.5 !important;
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+    div[data-testid="stChatInput"] textarea:focus {
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
     }
     div[data-testid="stChatInput"] button[data-testid="stChatInputSubmitButton"] {
         background-color: #d97706 !important;
