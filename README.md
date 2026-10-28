@@ -1,3 +1,15 @@
+---
+title: Nepal Legal Assistant with Citations
+emoji: ⚖️
+colorFrom: indigo
+colorTo: blue
+sdk: streamlit
+sdk_version: 1.35.0
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # rag-citations-evals
 
 Hybrid-retrieval RAG that **cites every sentence** and ships with a **reproducible eval

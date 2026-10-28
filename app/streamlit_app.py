@@ -6,8 +6,15 @@ Tab 2: Ablations & Evaluation Dashboard rendering experiments/ablations.csv.
 from __future__ import annotations
 
 import re
+import sys
 import time
 from pathlib import Path
+
+# Ensure src/ is in sys.path
+_repo_root = Path(__file__).resolve().parent.parent
+_src_dir = _repo_root / "src"
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
 
 import pandas as pd
 import streamlit as st

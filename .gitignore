@@ -11,9 +11,11 @@ __pycache__/
 .env
 kaggle.json
 
-# Data & artifacts (keep READMEs)
+# Data & artifacts (keep READMEs and prebuilt search index)
 data/*
 !data/README.md
+!data/index
+!data/index/**
 outputs/
 checkpoints/
 wandb/

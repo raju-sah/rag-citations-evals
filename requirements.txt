@@ -1,0 +1,12 @@
+streamlit>=1.35.0
+faiss-cpu
+sentence-transformers
+bm25s
+google-genai
+groq
+openai
+pandas
+scikit-learn
+python-dotenv
+pyyaml
+tqdm
