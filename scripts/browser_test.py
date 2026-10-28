@@ -179,6 +179,24 @@ def run_browser_tests():
         print(f"  ✓ Found {expanders.count()} source expanders.")
         assert expanders.count() > 0, "No source expanders rendered!"
 
+        # Test 4.5: Multi-Turn Q&A Persistence (Old questions and answers do NOT disappear)
+        print("\n--- Test 4.5: Multi-Turn History Persistence (All Q&As Shown) ---")
+        textarea = page.locator("textarea").first
+        textarea.fill("namaste")
+        time.sleep(0.3)
+        submit_btn = page.locator("button[data-testid='stChatInputSubmitButton']")
+        submit_btn.click()
+        page.wait_for_selector(".status-pill-ok:has-text('Instant Conversational Assistant')", timeout=10000)
+        time.sleep(1)
+        check_no_exceptions("After Second Query Submission")
+
+        # Verify BOTH questions are simultaneously visible on screen
+        q_chips = page.locator(".user-query-chip")
+        assert q_chips.count() == 2, f"Expected 2 question chips, found {q_chips.count()}!"
+        assert "नेपालको संविधानको धारा १६" in q_chips.nth(0).inner_text(), "First question missing!"
+        assert "namaste" in q_chips.nth(1).inner_text(), "Second question missing!"
+        print(f"  ✓ Confirmed: Both Question 1 ('{q_chips.nth(0).inner_text()[:40]}...') and Question 2 ('{q_chips.nth(1).inner_text()[:40]}...') remain visible!")
+
         # Test 5: Switch to Tab 2 (Ablations & Metrics Dashboard)
         print("\n--- Test 5: Switch to Ablation Dashboard Tab ---")
         tab_buttons = page.locator("[role='tab']")

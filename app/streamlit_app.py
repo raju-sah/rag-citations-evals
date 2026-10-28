@@ -257,7 +257,9 @@ with tab_qa:
         "What does the Constitution of Nepal state regarding the licensing of cryptocurrency exchanges and token staking?",
     ]
 
-    # Initialize query and result state
+    # Initialize conversation history and input state
+    if "qa_history" not in st.session_state:
+        st.session_state["qa_history"] = []
     if "query_input_val" not in st.session_state:
         st.session_state["query_input_val"] = ""
     if "last_result" not in st.session_state:
@@ -268,7 +270,8 @@ with tab_qa:
         if chosen:
             st.session_state["query_input_val"] = chosen
 
-    def reset_query():
+    def reset_chat_history():
+        st.session_state["qa_history"] = []
         st.session_state["last_result"] = None
         st.session_state["query_input_val"] = ""
         st.session_state["chip_selection"] = None
@@ -288,8 +291,8 @@ with tab_qa:
         disabled=(retriever is None),
     )
 
-    # Chip-style example questions - visible only before a question has been asked
-    if st.session_state.get("last_result") is None and not submitted_query:
+    # Chip-style example questions - visible only before any question has been asked
+    if not st.session_state.get("qa_history") and not submitted_query:
         st.markdown("💡 **Suggested questions (click to fill):**")
         st.pills(
             "Suggested questions",
@@ -305,7 +308,7 @@ with tab_qa:
         conv_reply = check_conversational_query(submitted_query)
         if conv_reply is not None:
             t_total = time.perf_counter() - t_pipeline_start
-            st.session_state["last_result"] = {
+            entry = {
                 "question": submitted_query,
                 "is_conversational": True,
                 "candidates": [],
@@ -362,7 +365,7 @@ with tab_qa:
                 val_report = validate_citations(gen_result.answer, num_sources=len(final_sources))
                 t_total = time.perf_counter() - t_pipeline_start
 
-                st.session_state["last_result"] = {
+                entry = {
                     "question": submitted_query,
                     "is_conversational": False,
                     "candidates": candidates,
@@ -372,86 +375,100 @@ with tab_qa:
                     "total_latency_s": t_total,
                 }
 
-    # Render results if available
-    if st.session_state.get("last_result") is not None:
-        res = st.session_state["last_result"]
-        is_conv = res.get("is_conversational", False)
-        candidates = res["candidates"]
-        final_sources = res["final_sources"]
-        gen_result = res["gen_result"]
-        val_report = res["val_report"]
-        total_latency_s = res.get("total_latency_s", gen_result.latency_s)
+        st.session_state["qa_history"].append(entry)
+        st.session_state["last_result"] = entry
 
-        # Active question chip with reset action
-        col_q, col_rst = st.columns([0.80, 0.20], vertical_alignment="center")
-        with col_q:
+    # Render complete conversation history of questions and answers
+    if st.session_state.get("qa_history"):
+        num_turns = len(st.session_state["qa_history"])
+        col_hdr, col_rst = st.columns([0.75, 0.25], vertical_alignment="center")
+        with col_hdr:
+            st.caption(f"💬 Conversation History — {num_turns} question{'s' if num_turns > 1 else ''}")
+        with col_rst:
+            st.button(
+                "↺ New Question / Clear Chat",
+                key="btn_reset_query",
+                on_click=reset_chat_history,
+                help="Clear all questions and answers and show suggested questions",
+            )
+
+        for turn_idx, res in enumerate(st.session_state["qa_history"], start=1):
+            is_latest = (turn_idx == num_turns)
+            is_conv = res.get("is_conversational", False)
+            candidates = res["candidates"]
+            final_sources = res["final_sources"]
+            gen_result = res["gen_result"]
+            val_report = res["val_report"]
+            total_latency_s = res.get("total_latency_s", gen_result.latency_s)
+
+            # Active question chip
+            q_label = f"Question {turn_idx}" if num_turns > 1 else "Question"
             st.markdown(
                 f"""
                 <div class="user-query-container">
                     <div class="user-query-chip">
                         <span class="user-query-icon">💬</span>
-                        <span><b>Question:</b> {res['question']}</span>
+                        <span><b>{q_label}:</b> {res['question']}</span>
                     </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-        with col_rst:
-            st.button(
-                "↺ New Question",
-                key="btn_reset_query",
-                on_click=reset_query,
-                help="Clear answer and show suggestion chips",
-            )
 
-        # Render citation validation status
-        if is_conv:
-            st.markdown(
-                "<div class='status-pill-ok'>💬 Instant Conversational Assistant (No retrieval needed for greeting)</div>",
-                unsafe_allow_html=True,
-            )
-        elif val_report["is_refusal"]:
-            st.markdown(
-                "<div class='status-pill-warn'>🛡️ Refusal Triggered: Model recognized question is not answerable from sources.</div>",
-                unsafe_allow_html=True,
-            )
-        elif val_report["valid"]:
-            st.markdown(
-                f"<div class='status-pill-ok'>✓ All {val_report['num_sentences']} sentences cited ({val_report['num_citations']} total citations). Zero hallucinated refs.</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            uncited_count = len(val_report["uncited_sentences"])
-            invalid_count = len(val_report["invalid_citations"])
-            st.markdown(
-                f"<div class='status-pill-warn'>⚠️ Citation Warning: {uncited_count} uncited sentences, {invalid_count} out-of-bounds citations.</div>",
-                unsafe_allow_html=True,
-            )
+            # Render citation validation status
+            if is_conv:
+                st.markdown(
+                    "<div class='status-pill-ok'>💬 Instant Conversational Assistant (No retrieval needed for greeting)</div>",
+                    unsafe_allow_html=True,
+                )
+            elif val_report["is_refusal"]:
+                st.markdown(
+                    "<div class='status-pill-warn'>🛡️ Refusal Triggered: Model recognized question is not answerable from sources.</div>",
+                    unsafe_allow_html=True,
+                )
+            elif val_report["valid"]:
+                st.markdown(
+                    f"<div class='status-pill-ok'>✓ All {val_report['num_sentences']} sentences cited ({val_report['num_citations']} total citations). Zero hallucinated refs.</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                uncited_count = len(val_report["uncited_sentences"])
+                invalid_count = len(val_report["invalid_citations"])
+                st.markdown(
+                    f"<div class='status-pill-warn'>⚠️ Citation Warning: {uncited_count} uncited sentences, {invalid_count} out-of-bounds citations.</div>",
+                    unsafe_allow_html=True,
+                )
 
-        # Render Answer with styled citation badges
-        st.markdown("### Answer")
-        st.markdown(_render_with_citation_badges(gen_result.answer), unsafe_allow_html=True)
+            # Render Answer with styled citation badges
+            st.markdown("### Answer")
+            st.markdown(_render_with_citation_badges(gen_result.answer), unsafe_allow_html=True)
 
-        # Provenance metadata
-        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-        col_m1.metric("Retrieved Candidates", len(candidates))
-        col_m2.metric("Final Sources Cited", len(final_sources))
-        col_m3.metric("End-to-End Latency", f"{total_latency_s:.2f}s")
-        col_m4.metric("LLM Cached", "Yes" if gen_result.cached else "No")
+            # Provenance metadata
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Retrieved Candidates", len(candidates))
+            col_m2.metric("Final Sources Cited", len(final_sources))
+            col_m3.metric("End-to-End Latency", f"{total_latency_s:.2f}s")
+            col_m4.metric("LLM Cached", "Yes" if gen_result.cached else "No")
 
-        # Sources drawer
-        if final_sources:
-            st.markdown("### Retrieved Sources Drawer")
-            for idx, src in enumerate(final_sources, start=1):
-                with st.expander(f"[{idx}] {src.header_path} (Pages {src.page_start}–{src.page_end})", expanded=(idx <= 2)):
-                    st.markdown(f"**Section ID:** `{src.section_id}` | **Score:** `{src.score:.4f}`")
-                    st.text_area(
-                        label=f"Source Text [{idx}]",
-                        value=src.text,
-                        height=180,
-                        key=f"src_view_{idx}",
-                        disabled=True,
-                    )
+            # Sources drawer
+            if final_sources:
+                st.markdown("### Retrieved Sources Drawer")
+                for src_idx, src in enumerate(final_sources, start=1):
+                    with st.expander(
+                        f"[{src_idx}] {src.header_path} (Pages {src.page_start}–{src.page_end})",
+                        expanded=(src_idx <= 2 and is_latest),
+                    ):
+                        st.markdown(f"**Section ID:** `{src.section_id}` | **Score:** `{src.score:.4f}`")
+                        st.text_area(
+                            label=f"Source Text [{src_idx}] (Q{turn_idx})",
+                            value=src.text,
+                            height=180,
+                            key=f"src_view_q{turn_idx}_{src_idx}",
+                            disabled=True,
+                        )
+
+            if not is_latest:
+                st.divider()
 
 # -------------------------------------------------------------
 # TAB 2: Ablations & Metrics Dashboard
