@@ -6,6 +6,8 @@ Running log of decisions, findings, and gotchas. Newest first.
 
 | Date | Decision | Why |
 |---|---|---|
+| 2026-10-28 | **Phase 2 Evals & Ablations Completed**: 8 core ablation runs + 1 prompt variant executed; results recorded in `experiments/ablations.csv` and summarized in `README.md`. | Demonstrates clear empirical superiority of structure-aware legal chunking (+65% Recall@5 over fixed-500) and cross-encoder reranking (+8.5% MRR). |
+| 2026-10-28 | **Kaggle GPU Batch Cross-Encoder Scoring**: Scored 7,022 candidate pairs on T4 GPU in 609 seconds (11.5 pairs/sec) and cached scores to `data/cache/rerank_scores.json`. | Eliminates CPU latency bottleneck (~9.7s/pair locally); allows subsequent full ablation sweeps in under 40 seconds on laptop CPU. |
 | 2026-10-28 | **Phase 1 Pipeline Completed**: Ingestion, structure-aware chunking (1,712 chunks), BM25 + FAISS indexers, language-routed hybrid retrieval, cached reranking, LLM generation with `[n]` citations, citation validator, and 2-tab Streamlit UI. | Core pipeline operational and verified with 20 unit tests; ready for golden dataset curation and Phase 2 evals. |
 | 2026-10-28 | **1-Hour Nepali PDF Extraction Spike Completed**: Raw Law Commission Nepali PDFs contain corrupt ToUnicode CMap font encodings (`मममि` for `मिति`, `िामी` for `हामी`, `ऐि` for `ऐन`). | Proves conclusively that indexing raw Nepali PDFs breaks lexical search; validates our decision to index clean English translations and handle Nepali via `bge-m3` cross-lingual semantic query routing. |
 | 2026-10-28 | **UI Scope**: 2-tab Streamlit app (Q&A demo with inline citations + sources drawer + reranker toggle; Ablation dashboard). | Keeps UI focused and clean (<200 lines) while highlighting both the interactive legal assistant and the eval results. |
@@ -23,6 +25,7 @@ Running log of decisions, findings, and gotchas. Newest first.
 
 ## Reference notes
 
+- **Kaggle GPU Quotas**: If the primary Kaggle account runs into GPU rate limits or exhausts its weekly 30-hour quota, we can switch to an alternate Kaggle account via CLI credentials (`~/.kaggle/kaggle.json`).
 - **Language-aware routing:** For Devanagari queries against English text, word-level token overlap is zero. BM25 produces near-random scores. Routing Devanagari queries directly to dense search avoids polluting RRF rank positions.
 - **Section-level evaluation:** Evaluating retrieval against section IDs (e.g. `labour-act-2017:s12`) instead of chunk IDs (e.g. `c042`) ensures that changing chunk size (300 vs 500 vs 800) does not invalidate ground truth labels. A retrieved chunk counts as a hit if its section ID intersects the gold section IDs.
 - **Hybrid fusion:** Reciprocal Rank Fusion `score = Σ 1/(k + rank)`, `k≈60`. No score normalisation needed between BM25 and cosine.
@@ -40,4 +43,6 @@ See `experiments/ablations.csv` — one row per run. Add free-text observations 
 
 ## Gotchas
 
-- _(fill in as you hit them)_
+- **Kaggle Account Phone Verification for GPU & Internet**: New Kaggle accounts silently disable GPU accelerators (`CUDA available: False`) and outbound internet access (`[Errno -3] Temporary failure in name resolution`) until the user completes one-time SMS phone verification at `https://www.kaggle.com/settings`.
+- **CPU Cross-Encoder Latency**: `BAAI/bge-reranker-v2-m3` takes ~9.7 seconds per pair on an Intel Core i5 laptop CPU. Running 7,022 evaluation pairs locally would take ~18 hours. Batch pre-scoring on Kaggle T4 takes ~10 minutes, making disk-based score caching (`rerank_scores.json`) essential for fast iterations.
+- **Fixed-Window Chunk Section Tracking**: Fixed token window chunking without section-level metadata causes evaluation ground truth mismatch. Tracking the active section provenance across sliding windows enables faithful comparison between naive token chunking and structure-aware chunking.

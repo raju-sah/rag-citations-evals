@@ -75,7 +75,7 @@ class HybridRetriever:
     def __init__(
         self,
         index_dir: str | Path = "data/index",
-        embedding_model_name: str = "BAAI/bge-m3",
+        embedding_model_name: str = "BAAI/bge-small-en-v1.5",
         device: str = "cpu",
     ) -> None:
         self.index_dir = Path(index_dir)
@@ -83,13 +83,35 @@ class HybridRetriever:
         self.device = device
         self._embedder = None
 
-        # Load dense index & metadata
-        self.faiss_index, self.metadata = load_dense_index(self.index_dir)
-        self.chunk_by_id = {m["chunk_id"]: m for m in self.metadata}
-        self.chunk_by_idx = {i: m for i, m in enumerate(self.metadata)}
+        # Load dense index & metadata if available
+        if (self.index_dir / "faiss.index").exists():
+            self.faiss_index, self.metadata = load_dense_index(self.index_dir)
+            self.chunk_by_id = {m["chunk_id"]: m for m in self.metadata}
+            self.chunk_by_idx = {i: m for i, m in enumerate(self.metadata)}
+        else:
+            self.faiss_index = None
+            self.metadata = []
+            # Load metadata from processed chunks if available
+            chunks_cand = [
+                self.index_dir / "chunks.jsonl",
+                Path("data/processed") / f"{self.index_dir.name.replace('index_', 'chunks_')}.jsonl",
+            ]
+            for cp in chunks_cand:
+                if cp.exists():
+                    import json
+
+                    with open(cp, "r", encoding="utf-8") as f:
+                        self.metadata = [json.loads(line) for line in f if line.strip()]
+                    self.chunk_by_id = {m["chunk_id"]: m for m in self.metadata}
+                    self.chunk_by_idx = {i: m for i, m in enumerate(self.metadata)}
+                    break
 
         # Load BM25 index
-        self.bm25_index = load_bm25_index(self.index_dir / "bm25")
+        bm25_dir = self.index_dir / "bm25"
+        if bm25_dir.exists():
+            self.bm25_index = load_bm25_index(bm25_dir)
+        else:
+            self.bm25_index = None
 
     @property
     def embedder(self):

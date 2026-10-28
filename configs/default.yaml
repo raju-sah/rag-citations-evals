@@ -13,7 +13,7 @@ chunk:
   min_section_tokens: 80
   tokenizer: BAAI/bge-m3
 
-embedding_model: BAAI/bge-m3
+embedding_model: BAAI/bge-small-en-v1.5
 
 retrieval:
   mode: hybrid                 # dense | bm25 | hybrid

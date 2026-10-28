@@ -301,11 +301,20 @@ def chunk_fixed_window(
 
     for doc_id, p_list in doc_pages.items():
         doc_title = p_list[0].title
-        # Flatten words with page tracking
-        word_records: list[tuple[str, int]] = []
-        for p in p_list:
-            for w in p.text.split():
-                word_records.append((w, p.page_number))
+        units = list(_extract_section_units(p_list))
+        word_records: list[tuple[str, int, str]] = []
+        for u in units:
+            sec_num = u["section_num"]
+            prefix = "art" if "constitution" in doc_id else "s"
+            sec_identifier = f"{prefix}{sec_num}" if sec_num != "sec" else "preamble"
+            sec_id = f"{doc_id}:{sec_identifier}"
+            for w in u["content"].split():
+                word_records.append((w, u["page_start"], sec_id))
+
+        if not word_records:
+            for p in p_list:
+                for w in p.text.split():
+                    word_records.append((w, p.page_number, f"{doc_id}:preamble"))
 
         step = max(1, chunk_size - overlap_tokens)
         chunk_idx = 1
@@ -314,16 +323,19 @@ def chunk_fixed_window(
             if not slice_records:
                 continue
 
-            text = " ".join(w for w, _ in slice_records)
+            text = " ".join(w for w, _, _ in slice_records)
             p_start = slice_records[0][1]
             p_end = slice_records[-1][1]
+            from collections import Counter
+
+            primary_sec = Counter(s[2] for s in slice_records).most_common(1)[0][0]
             chunk_id = f"{doc_id}:fixed_{chunk_size}:c{chunk_idx}"
 
             all_chunks.append(
                 Chunk(
                     chunk_id=chunk_id,
                     doc_id=doc_id,
-                    section_id=f"{doc_id}:fixed",
+                    section_id=primary_sec,
                     header_path=doc_title,
                     text=text,
                     content=text,

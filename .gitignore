@@ -22,3 +22,5 @@ wandb/
 *.pt
 *.ckpt
 kaggle/**/out/
+kaggle/pairs_to_score.json
+kaggle/error_logs/

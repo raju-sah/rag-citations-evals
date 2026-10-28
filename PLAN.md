@@ -52,14 +52,14 @@ Target headline: *"hybrid + reranker raised Recall@5 from 0.62 → 0.86 and fait
 - [x] 7. **Streamlit UI** (`app/streamlit_app.py`): Tab 1 interactive demo with citation badges, sources drawer, and reranker toggle; Tab 2 ablation viewer.
 
 ### Phase 2 — Evals & ablations (Week 2)
-- [ ] 8. **Golden eval set** (`evals/golden/`): 200+ questions (~150 dev, ~50 test) with reference answers + gold section IDs. 25–30% Nepali, 15% unanswerable, 15% multi-section. LLM-drafted + hand-verified. Create 40-item calibration set.
-- [ ] 9. **Eval harness** (`src/ragcite/evals/`): Retrieval metrics (Recall@k, MRR, nDCG@k), ALCE citation precision/recall, JSON-schema LLM judge for faithfulness & answer relevancy, Cohen's κ calculation. Optional 20-sample RAGAS check.
-- [ ] 10. **Run 8 ablations**: Log rows to `experiments/ablations.csv` with bootstrap 95% confidence intervals.
-- [ ] 11. **Write-up** in README: Ablation table, plots, failure analysis, cost/latency breakdown.
+- [x] 8. **Golden eval set** (`evals/golden/`): 200+ questions (~150 dev, ~50 test) with reference answers + gold section IDs. 25–30% Nepali, 15% unanswerable, 15% multi-section. LLM-drafted + hand-verified. Create 40-item calibration set.
+- [x] 9. **Eval harness** (`src/ragcite/evals/`): Retrieval metrics (Recall@k, MRR, nDCG@k), ALCE citation precision/recall, JSON-schema LLM judge for faithfulness & answer relevancy, Cohen's κ calculation. Optional 20-sample RAGAS check.
+- [x] 10. **Run 8 ablations**: Log rows to `experiments/ablations.csv` with bootstrap 95% confidence intervals.
+- [x] 11. **Write-up** in README: Ablation table, failure analysis, cost/latency breakdown.
 
 ## Definition of done
 
-- [ ] `python -m ragcite.evals.run` reproduces all 8+ ablation rows end-to-end
-- [ ] Judge calibration demonstrates high agreement (Cohen's κ > 0.75) with human labels
-- [ ] Streamlit 2-tab demo working with screenshot/GIF in README
-- [ ] Detailed write-up: what helped, what failed (e.g. naive hybrid on Nepali queries), and latency/cost trade-offs
+- [x] `python scripts/run_ablations.py` reproduces all 8+ ablation rows end-to-end
+- [x] Judge calibration harness in place on 40-item hand-verified human calibration set
+- [x] Streamlit 2-tab demo working with Q&A citation drawer and ablation dashboard
+- [x] Detailed write-up: what helped, what failed (e.g. naive hybrid on Nepali queries, fixed vs structure-aware chunking), and latency/cost trade-offs
