@@ -6,6 +6,7 @@ Running log of decisions, findings, and gotchas. Newest first.
 
 | Date | Decision | Why |
 |---|---|---|
+| 2026-10-28 | **Live Judge Calibration Verified**: Evaluated 40-item hand-verified calibration set via Groq `openai/gpt-oss-120b`; achieved **87.5% accuracy**, **Cohen's κ = 0.714 overall** (and **κ = 1.000 on Nepali** items). | Confirms cross-family LLM judge closely tracks human entailment judgments without self-preference bias. |
 | 2026-10-28 | **Phase 2 Evals & Ablations Completed**: 8 core ablation runs + 1 prompt variant executed; results recorded in `experiments/ablations.csv` and summarized in `README.md`. | Demonstrates clear empirical superiority of structure-aware legal chunking (+65% Recall@5 over fixed-500) and cross-encoder reranking (+8.5% MRR). |
 | 2026-10-28 | **Kaggle GPU Batch Cross-Encoder Scoring**: Scored 7,022 candidate pairs on T4 GPU in 609 seconds (11.5 pairs/sec) and cached scores to `data/cache/rerank_scores.json`. | Eliminates CPU latency bottleneck (~9.7s/pair locally); allows subsequent full ablation sweeps in under 40 seconds on laptop CPU. |
 | 2026-10-28 | **Phase 1 Pipeline Completed**: Ingestion, structure-aware chunking (1,712 chunks), BM25 + FAISS indexers, language-routed hybrid retrieval, cached reranking, LLM generation with `[n]` citations, citation validator, and 2-tab Streamlit UI. | Core pipeline operational and verified with 20 unit tests; ready for golden dataset curation and Phase 2 evals. |

@@ -37,9 +37,9 @@ class LLMJudge:
     def __init__(
         self,
         provider: str = "groq",
-        model: str = "llama-3.3-70b-versatile",
+        model: str = "openai/gpt-oss-120b",
         fallback_provider: str = "gemini",
-        fallback_model: str = "gemini-2.5-flash",
+        fallback_model: str = "gemini-3-flash-preview",
         cache_dir: str | Path = "data/cache/judge_cache",
     ) -> None:
         self.provider = provider.lower()
@@ -98,9 +98,9 @@ class LLMJudge:
         """Check if source_text entails claim. Returns (supported: bool, reason: str)."""
         prompt = f"SOURCE TEXT:\n{source_text}\n\nCLAIM TO EVALUATE:\n{claim}"
 
-        # Choose model: if Nepali and configured, use fallback provider (Gemini)
-        provider = self.fallback_provider if (language == "ne" and self.fallback_provider) else self.provider
-        model = self.fallback_model if (language == "ne" and self.fallback_provider) else self.model
+        # Choose model: default to primary provider (Groq) with fallback
+        provider = self.provider
+        model = self.model
 
         cache_file = self.cache_dir / f"{self._cache_key(prompt, model)}.json"
         if cache_file.exists():
@@ -116,14 +116,20 @@ class LLMJudge:
             parsed = json.loads(raw_json)
             supported = bool(parsed.get("supported", False))
             reason = str(parsed.get("reason", ""))
-        except (json.JSONDecodeError, KeyError, ValueError, RuntimeError, OSError) as err:
-            logger.warning("Judge call failed: %s; falling back to lexical overlap heuristic", err)
-            # Heuristic fallback: if claim words overlap significantly with source words
-            claim_words = set(claim.lower().split())
-            source_words = set(source_text.lower().split())
-            overlap = len(claim_words & source_words) / max(1, len(claim_words))
-            supported = overlap > 0.4
-            reason = f"Heuristic fallback overlap {overlap:.2f}"
+        except Exception as err:  # noqa: BLE001
+            logger.warning("Primary judge call failed: %s; trying fallback %s", err, self.fallback_provider)
+            try:
+                raw_json = self._call_api(prompt, ENTAILMENT_SYSTEM_PROMPT, self.fallback_model, self.fallback_provider)
+                parsed = json.loads(raw_json)
+                supported = bool(parsed.get("supported", False))
+                reason = str(parsed.get("reason", ""))
+            except Exception as fallback_err:  # noqa: BLE001
+                logger.warning("Fallback judge call failed: %s; using lexical overlap heuristic", fallback_err)
+                claim_words = set(claim.lower().split())
+                source_words = set(source_text.lower().split())
+                overlap = len(claim_words & source_words) / max(1, len(claim_words))
+                supported = overlap > 0.4
+                reason = f"Heuristic fallback overlap {overlap:.2f}"
 
         # Cache result
         try:

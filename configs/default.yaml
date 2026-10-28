@@ -29,16 +29,16 @@ rerank:
 
 llm:
   provider: gemini             # gemini | openai | anthropic | groq
-  model: gemini-2.5-flash
+  model: gemini-3-flash-preview
   temperature: 0.0
   cache_dir: data/cache/llm_cache
 
 eval:
   golden_set: evals/golden/golden.jsonl
   judge_provider: groq         # groq | gemini
-  judge_model: llama-3.3-70b-versatile
+  judge_model: openai/gpt-oss-120b
   judge_fallback_provider: gemini
-  judge_fallback_model: gemini-2.5-flash
+  judge_fallback_model: gemini-3-flash-preview
   calibration_set: evals/golden/calibration_40.jsonl
   sample_ragas_validation_k: 20
 

@@ -43,8 +43,11 @@ The evaluation suite runs across 8 core configurations + 1 prompt variant agains
 3. **Language-Aware Cross-Lingual Routing**:
    - Devanagari Nepali queries have 0% lexical token overlap with English legislative text. Without script routing, BM25 returns spurious keyword matches that pollute the Reciprocal Rank Fusion (RRF) pool. Routing Devanagari queries directly to dense embedding search prevents rank corruption.
 
-4. **Latency & Compute Trade-Offs**:
-   - `bge-reranker-v2-m3` on laptop CPU (i5-8250U) requires ~9.7 seconds per candidate pair. Batch scoring all 7,022 evaluation pairs on a Kaggle T4 GPU took **609 seconds** (~10 minutes, 11.5 pairs/sec). Caching scores to `data/cache/rerank_scores.json` reduced local evaluation sweeps from hours to **under 40 seconds**.
+4. **Cross-Family Judge Calibration (Cohen's κ)**:
+   - Evaluated on a 40-item hand-annotated human calibration set using Groq `openai/gpt-oss-120b`:
+     - **Accuracy:** 87.5% agreement with human ground-truth.
+     - **Overall Cohen's κ:** `0.714` (substantial agreement).
+     - **Nepali Cohen's κ:** `1.000` (perfect agreement on cross-lingual claims).
 
 ## Layout
 
@@ -55,7 +58,7 @@ app/                Streamlit demo
 configs/            YAML experiment configs
 evals/golden/       golden Q/A set (questions, reference answers, gold chunk ids)
 experiments/        ablations.csv (one row per run)
-kaggle/             optional GPU kernel for large-corpus embedding / local LLM
+kaggle/             GPU kernel for batch cross-encoder rerank scoring
 tests/
 ```
 
@@ -63,9 +66,17 @@ tests/
 
 ```bash
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-cp .env.example .env   # add your LLM API key
+uv pip install -e ".[dev,llm,rag,ui]"
+cp .env.example .env   # add GEMINI_API_KEY and GROQ_API_KEY
+
+# Run unit tests
 pytest
+
+# Launch 2-tab interactive Streamlit demo
+streamlit run app/streamlit_app.py
+
+# Run full ablation suite locally (uses cached GPU rerank scores)
+python scripts/run_ablations.py
 ```
 
 ## License

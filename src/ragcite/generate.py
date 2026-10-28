@@ -78,7 +78,7 @@ class LLMClient:
     def __init__(
         self,
         provider: str = "gemini",
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3-flash-preview",
         temperature: float = 0.0,
         cache_dir: str | Path = "data/cache/llm_cache",
         api_key: str | None = None,
