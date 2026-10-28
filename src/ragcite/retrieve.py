@@ -49,6 +49,82 @@ class RetrievedCandidate:
         }
 
 
+_DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+
+_NEPALI_LEGAL_GLOSSARY: list[tuple[str, str]] = [
+    ("नेपालको संविधान", "Constitution of Nepal"),
+    ("संविधान", "Constitution of Nepal"),
+    ("धारा", "Article"),
+    ("दफा", "Section"),
+    ("अनुसूची", "Schedule"),
+    ("सम्मानपूर्वक बाँच्न पाउने हक", "Right to live with dignity"),
+    ("स्वतन्त्रताको हक", "Right to freedom"),
+    ("समानताको हक", "Right to equality"),
+    ("सञ्चारको हक", "Right to communication"),
+    ("न्याय सम्बन्धी हक", "Right relating to justice"),
+    ("यातना विरुद्धको हक", "Right against torture"),
+    ("सूचनाको हक", "Right to information"),
+    ("सम्पत्तिको हक", "Right to property"),
+    ("धार्मिक स्वतन्त्रताको हक", "Right to freedom of religion"),
+    ("स्वच्छ वातावरणको हक", "Right to clean environment"),
+    ("शिक्षा सम्बन्धी हक", "Right relating to education"),
+    ("भाषा तथा संस्कृतिको हक", "Right to language and culture"),
+    ("रोजगारीको हक", "Right to employment"),
+    ("श्रमको हक", "Right to labour"),
+    ("स्वास्थ्य सम्बन्धी हक", "Right relating to health"),
+    ("खाद्य सम्बन्धी हक", "Right relating to food"),
+    ("आवासको हक", "Right to housing"),
+    ("महिलाको हक", "Rights of women"),
+    ("बालबालिकाको हक", "Rights of the child"),
+    ("दलितको हक", "Rights of Dalit"),
+    ("जेष्ठ नागरिकको हक", "Rights of senior citizens"),
+    ("सामाजिक न्यायको हक", "Right to social justice"),
+    ("सामाजिक सुरक्षाको हक", "Right to social security"),
+    ("उपभोक्ताको हक", "Rights of the consumer"),
+    ("मृत्युदण्ड", "death penalty capital punishment"),
+    ("नागरिकका कर्तव्य", "Duties of citizens"),
+    ("श्रम ऐन", "Labour Act 2017"),
+    ("परीक्षणकाल", "probation period"),
+    ("सुत्केरी बिदा", "maternity leave"),
+    ("प्रसूति बिदा", "maternity leave"),
+    ("बिरामी बिदा", "sick leave"),
+    ("सार्वजनिक बिदा", "public holiday"),
+    ("सट्टा बिदा", "replacement leave"),
+    ("अतिरिक्त पारिश्रमिक", "overtime remuneration"),
+    ("मुलुकी देवानी संहिता", "Muluki Civil Code 2017"),
+    ("देवानी संहिता", "Muluki Civil Code 2017"),
+    ("करार", "contract"),
+    ("नाबालिग", "minor"),
+    ("सम्बन्ध विच्छेद", "divorce"),
+    ("घरबहाल", "house rent"),
+    ("मुलुकी अपराध संहिता", "Muluki Penal Code 2017"),
+    ("अपराध संहिता", "Muluki Penal Code 2017"),
+    ("ज्यान मार्ने", "homicide murder"),
+    ("आपराधिक विश्वासघात", "criminal breach of trust"),
+    ("अपहरण", "kidnapping"),
+    ("शरीर बन्धक", "hostage"),
+    ("गाली बेइज्जती", "defamation"),
+    ("फौजदारी कार्यविधि संहिता", "Muluki Criminal Procedure Code 2017"),
+    ("पक्राउ पूर्जी", "arrest warrant"),
+    ("पक्राउ", "arrest"),
+    ("धरौटी", "bail"),
+    ("भ्रष्टाचार निवारण ऐन", "Prevention of Corruption Act 2002"),
+    ("भ्रष्टाचार", "corruption bribery"),
+    ("गैरकानूनी सम्पत्ति", "property amassed illegally"),
+    ("वातावरण संरक्षण ऐन", "Environment Protection Act 2019"),
+    ("प्रदूषण", "pollution"),
+    ("क्षतिपूर्ति", "compensation"),
+    ("औद्योगिक व्यवसाय ऐन", "Industrial Enterprises Act 2020"),
+    ("उद्योग", "industry enterprise"),
+    ("विदेशी लगानी", "foreign investment FITTA"),
+    ("मानव अधिकार आयोग", "National Human Rights Commission Act"),
+    ("हक", "right"),
+    ("सजाय", "punishment penalty"),
+    ("जरिवाना", "fine"),
+    ("कैद", "imprisonment"),
+]
+
+
 def is_devanagari(text: str) -> bool:
     """Detect if a query is predominantly in Devanagari script."""
     stripped = text.replace(" ", "")
@@ -56,6 +132,36 @@ def is_devanagari(text: str) -> bool:
         return False
     devanagari_chars = sum(1 for ch in stripped if "\u0900" <= ch <= "\u097f")
     return (devanagari_chars / len(stripped)) > 0.25
+
+
+def translate_devanagari_query(query: str) -> str:
+    """Normalize Devanagari numerals and expand Nepali legal terminology into English for English-indexed retrieval."""
+    normalized = query.translate(_DEVANAGARI_DIGITS)
+    english_terms: list[str] = []
+    for ne_term, en_term in _NEPALI_LEGAL_GLOSSARY:
+        if ne_term in normalized:
+            english_terms.append(en_term)
+    # Extract any ASCII words/numbers (including translated numerals like '16', '31')
+    import re
+
+    ascii_tokens = re.findall(r"[A-Za-z0-9]+", normalized)
+    combined = " ".join(english_terms + ascii_tokens).strip()
+    return combined if combined else normalized
+
+
+def _resolve_section_id(meta: dict, search_query: str) -> str:
+    """Resolve the specific section_id when a chunk contains merged sections."""
+    all_secs = meta.get("all_section_ids")
+    if not all_secs or len(all_secs) <= 1:
+        return meta["section_id"]
+    import re
+
+    query_nums = set(re.findall(r"\b(\d+)\b", search_query))
+    for sec_id in all_secs:
+        m = re.search(r"(?:art|s)(\d+)$", sec_id)
+        if m and m.group(1) in query_nums:
+            return sec_id
+    return meta["section_id"]
 
 
 def reciprocal_rank_fusion(
@@ -120,7 +226,12 @@ class HybridRetriever:
             from sentence_transformers import SentenceTransformer
 
             logger.info("Loading embedder %s for queries on %s...", self.embedding_model_name, self.device)
-            self._embedder = SentenceTransformer(self.embedding_model_name, device=self.device)
+            try:
+                self._embedder = SentenceTransformer(
+                    self.embedding_model_name, device=self.device, local_files_only=True
+                )
+            except Exception:  # noqa: BLE001
+                self._embedder = SentenceTransformer(self.embedding_model_name, device=self.device)
         return self._embedder
 
     def search_dense(self, query: str, top_k: int = 20) -> list[tuple[str, float, int]]:
@@ -159,15 +270,15 @@ class HybridRetriever:
     ) -> list[RetrievedCandidate]:
         """Execute retrieval according to specified mode and script routing."""
         query_is_devanagari = is_devanagari(query)
-
-        # Handle routing: Devanagari query skips BM25 if routing enabled
+        search_query = (
+            translate_devanagari_query(query)
+            if (query_is_devanagari and route_devanagari)
+            else query
+        )
         effective_mode = mode
-        if mode == "hybrid" and query_is_devanagari and route_devanagari:
-            logger.info("Query detected as Devanagari; routing to dense-only retrieval.")
-            effective_mode = "dense"
 
         if effective_mode == "dense":
-            dense_res = self.search_dense(query, top_k=top_k)
+            dense_res = self.search_dense(search_query, top_k=top_k)
             candidates: list[RetrievedCandidate] = []
             for rank, (cid, score, d_rank) in enumerate(dense_res, start=1):
                 meta = self.chunk_by_id[cid]
@@ -175,7 +286,7 @@ class HybridRetriever:
                     RetrievedCandidate(
                         chunk_id=cid,
                         doc_id=meta["doc_id"],
-                        section_id=meta["section_id"],
+                        section_id=_resolve_section_id(meta, search_query),
                         header_path=meta["header_path"],
                         text=meta["text"],
                         page_start=meta["page_start"],
@@ -189,7 +300,7 @@ class HybridRetriever:
             return candidates
 
         elif effective_mode == "bm25":
-            bm25_res = self.search_bm25(query, top_k=top_k)
+            bm25_res = self.search_bm25(search_query, top_k=top_k)
             candidates = []
             for rank, (cid, score, b_rank) in enumerate(bm25_res, start=1):
                 meta = self.chunk_by_id[cid]
@@ -197,7 +308,7 @@ class HybridRetriever:
                     RetrievedCandidate(
                         chunk_id=cid,
                         doc_id=meta["doc_id"],
-                        section_id=meta["section_id"],
+                        section_id=_resolve_section_id(meta, search_query),
                         header_path=meta["header_path"],
                         text=meta["text"],
                         page_start=meta["page_start"],
@@ -211,8 +322,8 @@ class HybridRetriever:
             return candidates
 
         elif effective_mode == "hybrid":
-            dense_res = self.search_dense(query, top_k=top_k)
-            bm25_res = self.search_bm25(query, top_k=top_k)
+            dense_res = self.search_dense(search_query, top_k=top_k)
+            bm25_res = self.search_bm25(search_query, top_k=top_k)
 
             dense_ranks = {cid: r for cid, _, r in dense_res}
             bm25_ranks = {cid: r for cid, _, r in bm25_res}
@@ -230,7 +341,7 @@ class HybridRetriever:
                     RetrievedCandidate(
                         chunk_id=cid,
                         doc_id=meta["doc_id"],
-                        section_id=meta["section_id"],
+                        section_id=_resolve_section_id(meta, search_query),
                         header_path=meta["header_path"],
                         text=meta["text"],
                         page_start=meta["page_start"],

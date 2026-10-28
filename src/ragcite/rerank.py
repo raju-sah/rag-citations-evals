@@ -17,6 +17,8 @@ from ragcite.retrieve import RetrievedCandidate
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CACHE_PATH = Path("data/cache/rerank_scores.json")
+_FAST_CPU_RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_RERANKER_INSTANCES: dict[str, CrossEncoderReranker] = {}
 
 
 def _load_cache(cache_path: Path) -> dict[str, float]:
@@ -41,17 +43,19 @@ def _save_cache(cache_path: Path, cache: dict[str, float]) -> None:
 
 
 class CrossEncoderReranker:
-    """Wraps cross-encoder model scoring with disk cache support."""
+    """Wraps cross-encoder model scoring with disk cache support and fast CPU inference."""
 
     def __init__(
         self,
         model_name: str = "BAAI/bge-reranker-v2-m3",
         cache_path: str | Path | None = _DEFAULT_CACHE_PATH,
         device: str = "cpu",
+        max_length: int = 256,
     ) -> None:
         self.model_name = model_name
         self.cache_path = Path(cache_path) if cache_path else None
         self.device = device
+        self.max_length = max_length
         self._model = None
         self.cache: dict[str, float] = (
             _load_cache(self.cache_path) if self.cache_path else {}
@@ -59,19 +63,39 @@ class CrossEncoderReranker:
 
     @property
     def model(self):
-        """Lazy load CrossEncoder."""
+        """Lazy load CrossEncoder (uses fast MiniLM on CPU if BGE-M3 requested without GPU)."""
         if self._model is None:
             from sentence_transformers import CrossEncoder
 
-            logger.info("Loading cross-encoder %s on %s...", self.model_name, self.device)
-            self._model = CrossEncoder(self.model_name, device=self.device)
+            effective_model = (
+                _FAST_CPU_RERANKER
+                if (self.device == "cpu" and self.model_name == "BAAI/bge-reranker-v2-m3")
+                else self.model_name
+            )
+            logger.info("Loading cross-encoder %s on %s...", effective_model, self.device)
+            try:
+                self._model = CrossEncoder(
+                    effective_model,
+                    device=self.device,
+                    max_length=self.max_length,
+                    local_files_only=True,
+                )
+            except Exception:  # noqa: BLE001
+                self._model = CrossEncoder(
+                    effective_model,
+                    device=self.device,
+                    max_length=self.max_length,
+                )
         return self._model
 
     def score_pairs(self, query: str, candidates: Sequence[RetrievedCandidate]) -> list[float]:
         """Score (query, candidate.text) pairs using cache where possible."""
+        from ragcite.retrieve import is_devanagari, translate_devanagari_query
+
         scores: list[float] = []
         uncached_indices: list[int] = []
         uncached_pairs: list[tuple[str, str]] = []
+        effective_query = translate_devanagari_query(query) if is_devanagari(query) else query
 
         for idx, cand in enumerate(candidates):
             key = f"{query}::{cand.chunk_id}"
@@ -80,11 +104,13 @@ class CrossEncoderReranker:
             else:
                 scores.append(0.0)  # placeholder
                 uncached_indices.append(idx)
-                uncached_pairs.append((query, cand.text))
+                uncached_pairs.append((effective_query, cand.text))
 
         if uncached_pairs:
             logger.info("Computing cross-encoder scores for %d uncached pairs...", len(uncached_pairs))
-            new_scores = self.model.predict(uncached_pairs, show_progress_bar=False)
+            new_scores = self.model.predict(
+                uncached_pairs, batch_size=32, show_progress_bar=False
+            )
             if hasattr(new_scores, "tolist"):
                 new_scores = new_scores.tolist()
 
@@ -133,6 +159,19 @@ class CrossEncoderReranker:
         return reranked
 
 
+def get_reranker(
+    model_name: str = "BAAI/bge-reranker-v2-m3",
+    cache_path: str | Path | None = _DEFAULT_CACHE_PATH,
+) -> CrossEncoderReranker:
+    """Return a process-wide cached CrossEncoderReranker singleton."""
+    instance_key = f"{model_name}::{cache_path}"
+    if instance_key not in _RERANKER_INSTANCES:
+        _RERANKER_INSTANCES[instance_key] = CrossEncoderReranker(
+            model_name=model_name, cache_path=cache_path
+        )
+    return _RERANKER_INSTANCES[instance_key]
+
+
 def rerank(
     query: str,
     candidates: Sequence[RetrievedCandidate],
@@ -140,8 +179,8 @@ def rerank(
     model_name: str = "BAAI/bge-reranker-v2-m3",
     cache_path: str | Path | None = _DEFAULT_CACHE_PATH,
 ) -> list[RetrievedCandidate]:
-    """Functional wrapper for cross-encoder reranking."""
-    reranker = CrossEncoderReranker(model_name=model_name, cache_path=cache_path)
+    """Functional wrapper for cross-encoder reranking using cached singleton."""
+    reranker = get_reranker(model_name=model_name, cache_path=cache_path)
     return reranker.rerank(query=query, candidates=candidates, top_k=top_k)
 
 

@@ -5,6 +5,8 @@ Tab 2: Ablations & Evaluation Dashboard rendering experiments/ablations.csv.
 
 from __future__ import annotations
 
+import re
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -14,8 +16,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from ragcite.citations import validate_citations
-from ragcite.generate import answer_with_citations
-from ragcite.rerank import rerank
+from ragcite.generate import (
+    GenerationResult,
+    answer_with_citations,
+    check_conversational_query,
+)
+from ragcite.rerank import get_reranker, rerank
 from ragcite.retrieve import HybridRetriever
 
 st.set_page_config(
@@ -130,10 +136,31 @@ def get_retriever():
     if not (index_dir / "bm25").exists() or not (index_dir / "faiss.index").exists():
         return None
     try:
-        return HybridRetriever(index_dir=index_dir)
+        ret = HybridRetriever(index_dir=index_dir)
+        _ = ret.embedder  # Pre-warm query embedder in memory
+        return ret
     except (OSError, ValueError, RuntimeError) as err:
         st.sidebar.error(f"Failed to load retriever: {err}")
         return None
+
+
+@st.cache_resource(show_spinner=False)
+def get_cached_reranker():
+    try:
+        rr = get_reranker()
+        _ = rr.model  # Pre-warm fast CPU cross-encoder in memory
+        return rr
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _render_with_citation_badges(text: str) -> str:
+    """Convert inline [1] or [1, 2] markers into styled HTML citation badges."""
+    return re.sub(
+        r"\[(\d+(?:\s*,\s*\d+)*)\]",
+        r"<span class='cite-badge'>[\1]</span>",
+        text,
+    )
 
 
 tab_qa, tab_eval = st.tabs(["⚖️ Interactive Q&A Demo", "📊 Ablations & Metrics Dashboard"])
@@ -151,8 +178,8 @@ with st.sidebar:
         index=0,
     )
     reranker_enabled = st.toggle("Enable Cross-Encoder Reranker", value=True)
-    route_devanagari = st.toggle("Language-Aware Routing (Devanagari → Dense)", value=True)
-    top_k_candidates = st.slider("Top Candidates Fetched", min_value=5, max_value=30, value=20)
+    route_devanagari = st.toggle("Language-Aware Routing (Devanagari → EN)", value=True)
+    top_k_candidates = st.slider("Top Candidates Fetched", min_value=5, max_value=30, value=15)
     final_k = st.slider("Final Context Chunks (k)", min_value=1, max_value=10, value=5)
 
     st.markdown("---")
@@ -189,6 +216,7 @@ with tab_qa:
             st.session_state["query_input_val"] = chosen
 
     retriever = get_retriever()
+    _ = get_cached_reranker()
     if retriever is None:
         st.warning(
             "⚠️ Retrieval indexes not yet found in `data/index/`. "
@@ -215,52 +243,94 @@ with tab_qa:
     )
 
     if submitted_query:
-        with st.spinner("Retrieving candidates & generating cited answer..."):
-            # 1. Retrieve
-            candidates = retriever.retrieve(
-                query=submitted_query,
-                top_k=top_k_candidates,
-                mode=retrieval_mode,
-                route_devanagari=route_devanagari,
-            )
-
-            # 2. Rerank
-            if reranker_enabled and candidates:
-                final_sources = rerank(
-                    query=submitted_query,
-                    candidates=candidates,
-                    top_k=final_k,
-                )
-            else:
-                final_sources = candidates[:final_k]
-
-            # 3. Generate with citations
-            gen_result = answer_with_citations(
-                question=submitted_query,
-                sources=final_sources,
-            )
-
-            # 4. Structural validation
-            val_report = validate_citations(gen_result.answer, num_sources=len(final_sources))
-
+        t_pipeline_start = time.perf_counter()
+        conv_reply = check_conversational_query(submitted_query)
+        if conv_reply is not None:
+            t_total = time.perf_counter() - t_pipeline_start
             st.session_state["last_result"] = {
                 "question": submitted_query,
-                "candidates": candidates,
-                "final_sources": final_sources,
-                "gen_result": gen_result,
-                "val_report": val_report,
+                "is_conversational": True,
+                "candidates": [],
+                "final_sources": [],
+                "gen_result": GenerationResult(
+                    question=submitted_query,
+                    answer=conv_reply,
+                    sources=[],
+                    model="instant-router",
+                    provider="local",
+                    cached=True,
+                    latency_s=t_total,
+                    prompt="",
+                ),
+                "val_report": {
+                    "num_sentences": 0,
+                    "num_citations": 0,
+                    "invalid_citations": [],
+                    "uncited_sentences": [],
+                    "structural_citation_recall": 1.0,
+                    "structural_citation_precision": 1.0,
+                    "is_refusal": False,
+                    "valid": True,
+                },
+                "total_latency_s": t_total,
             }
+        else:
+            with st.spinner("Retrieving candidates & generating cited answer..."):
+                # 1. Retrieve
+                candidates = retriever.retrieve(
+                    query=submitted_query,
+                    top_k=top_k_candidates,
+                    mode=retrieval_mode,
+                    route_devanagari=route_devanagari,
+                )
+
+                # 2. Rerank
+                if reranker_enabled and candidates:
+                    final_sources = rerank(
+                        query=submitted_query,
+                        candidates=candidates,
+                        top_k=final_k,
+                    )
+                else:
+                    final_sources = candidates[:final_k]
+
+                # 3. Generate with citations
+                gen_result = answer_with_citations(
+                    question=submitted_query,
+                    sources=final_sources,
+                )
+
+                # 4. Structural validation
+                val_report = validate_citations(gen_result.answer, num_sources=len(final_sources))
+                t_total = time.perf_counter() - t_pipeline_start
+
+                st.session_state["last_result"] = {
+                    "question": submitted_query,
+                    "is_conversational": False,
+                    "candidates": candidates,
+                    "final_sources": final_sources,
+                    "gen_result": gen_result,
+                    "val_report": val_report,
+                    "total_latency_s": t_total,
+                }
 
     # Render results if available
     if st.session_state.get("last_result") is not None:
         res = st.session_state["last_result"]
+        is_conv = res.get("is_conversational", False)
         candidates = res["candidates"]
         final_sources = res["final_sources"]
         gen_result = res["gen_result"]
         val_report = res["val_report"]
+        total_latency_s = res.get("total_latency_s", gen_result.latency_s)
 
         # Render citation validation status
-        if val_report["is_refusal"]:
+        if is_conv:
+            st.markdown(
+                "<div class='status-pill-ok'>💬 Instant Conversational Assistant (No retrieval needed for greeting)</div>",
+                unsafe_allow_html=True,
+            )
+        elif val_report["is_refusal"]:
             st.markdown(
                 "<div class='status-pill-warn'>🛡️ Refusal Triggered: Model recognized question is not answerable from sources.</div>",
                 unsafe_allow_html=True,
@@ -278,29 +348,30 @@ with tab_qa:
                 unsafe_allow_html=True,
             )
 
-        # Render Answer
+        # Render Answer with styled citation badges
         st.markdown("### Answer")
-        st.write(gen_result.answer)
+        st.markdown(_render_with_citation_badges(gen_result.answer), unsafe_allow_html=True)
 
         # Provenance metadata
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         col_m1.metric("Retrieved Candidates", len(candidates))
         col_m2.metric("Final Sources Cited", len(final_sources))
-        col_m3.metric("Latency", f"{gen_result.latency_s:.2f}s")
+        col_m3.metric("End-to-End Latency", f"{total_latency_s:.2f}s")
         col_m4.metric("LLM Cached", "Yes" if gen_result.cached else "No")
 
         # Sources drawer
-        st.markdown("### Retrieved Sources Drawer")
-        for idx, src in enumerate(final_sources, start=1):
-            with st.expander(f"[{idx}] {src.header_path} (Pages {src.page_start}–{src.page_end})", expanded=(idx <= 2)):
-                st.markdown(f"**Section ID:** `{src.section_id}` | **Score:** `{src.score:.4f}`")
-                st.text_area(
-                    label=f"Source Text [{idx}]",
-                    value=src.text,
-                    height=180,
-                    key=f"src_view_{idx}",
-                    disabled=True,
-                )
+        if final_sources:
+            st.markdown("### Retrieved Sources Drawer")
+            for idx, src in enumerate(final_sources, start=1):
+                with st.expander(f"[{idx}] {src.header_path} (Pages {src.page_start}–{src.page_end})", expanded=(idx <= 2)):
+                    st.markdown(f"**Section ID:** `{src.section_id}` | **Score:** `{src.score:.4f}`")
+                    st.text_area(
+                        label=f"Source Text [{idx}]",
+                        value=src.text,
+                        height=180,
+                        key=f"src_view_{idx}",
+                        disabled=True,
+                    )
 
 # -------------------------------------------------------------
 # TAB 2: Ablations & Metrics Dashboard

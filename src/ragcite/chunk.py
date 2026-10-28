@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 # Pattern detecting Parts, Chapters, Schedules, Articles, and Sections
 _HEADING_RE = re.compile(
     r"(?:^|\n)\s*(?P<heading>"
-    r"(?:Part\s*[-–—]?\s*(?:\d+|[IVXLCDM]+)[^\n]*)|"
-    r"(?:Chapter\s*[-–—]?\s*(?:\d+|[IVXLCDM]+)[^\n]*)|"
-    r"(?:Schedule\s*[-–—]?\s*(?:\d+|[IVXLCDM]+)[^\n]*)|"
-    r"(?:(?:Article|Section)\s*(?P<sec_num_word>\d+)[.:\s][^\n]*)|"
+    r"(?:Part(?:\s*[-–—]\s*|\s+)(?:\d+|[IVXLCDM]+)\b[^\n]{0,60})|"
+    r"(?:Chapter(?:\s*[-–—]\s*|\s+)(?:\d+|[IVXLCDM]+)\b[^\n]{0,60})|"
+    r"(?:Schedule(?:\s*[-–—]\s*|\s+)(?:\d+|[IVXLCDM]+)\b[^\n:]{0,40}$)|"
+    r"(?:(?:Article|Section)\s+(?P<sec_num_word>\d+)\b[.:\s][^\n]*)|"
     r"(?:(?P<sec_num_start>\d+)\.\s+(?P<sec_title>[A-Z][^\n:]+):)"
     r")",
     re.IGNORECASE,
@@ -140,6 +140,7 @@ def _extract_section_units(
 
                 if heading_lower.startswith("part"):
                     current_part = heading_raw.rstrip(":- ")
+                    current_chapter = ""
                     continue
                 elif heading_lower.startswith(("chapter", "schedule")):
                     current_chapter = heading_raw.rstrip(":- ")
@@ -205,20 +206,21 @@ def chunk_structure_aware(
 
     for doc_id, p_list in doc_pages.items():
         units = list(_extract_section_units(p_list))
-        # Merge tiny definitions/subsections (< min_section_tokens) into neighbors
+        # Merge tiny unnumbered subsections (< min_section_tokens) into neighbors,
+        # but never merge distinct numbered Articles/Sections so section_ids stay intact.
         merged_units: list[dict] = []
         for u in units:
             toks = estimate_tokens(u["content"])
             if (
                 merged_units
                 and toks < min_section_tokens
+                and u["section_num"] in ("sec", "preliminary")
+                and (merged_units[-1]["part"] == u["part"])
                 and (merged_units[-1]["chapter"] == u["chapter"])
             ):
                 prev = merged_units[-1]
                 prev["content"] += f"\n\n{u['content']}"
                 prev["page_end"] = max(prev["page_end"], u["page_end"])
-                if u["section_num"] != "sec":
-                    prev["section_title"] += f" & {u['section_title']}"
             else:
                 merged_units.append(u)
 

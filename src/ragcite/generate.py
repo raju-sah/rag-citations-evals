@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -18,6 +19,33 @@ from pathlib import Path
 from ragcite.retrieve import RetrievedCandidate
 
 logger = logging.getLogger(__name__)
+
+_GREETING_PATTERNS = re.compile(
+    r"^\s*(?:hi|hello|hey|hi\s+there|hello\s+there|hey\s+there|namaste|namaskar|"
+    r"नमस्ते|नमस्कार|good\s+(?:morning|afternoon|evening|day)|"
+    r"how\s+are\s+you(?:\s+doing)?|who\s+are\s+you|what\s+can\s+you\s+do|"
+    r"help|thanks|thank\s+you|धन्यवाद|के\s+छ|कस्तो\s+छ)[!.?\s]*$",
+    re.IGNORECASE,
+)
+
+
+def check_conversational_query(question: str) -> str | None:
+    """Return an instant helpful greeting if the input is casual chitchat rather than a legal query."""
+    cleaned = question.strip()
+    if not cleaned:
+        return None
+    if _GREETING_PATTERNS.match(cleaned):
+        return (
+            "Namaste! 👋 I am the **Nepal Legal Assistant**. I answer questions about Nepalese law "
+            "with strict sentence-level citations `[n]` backed by statutory sources.\n\n"
+            "**You can ask me in English or Nepali about:**\n"
+            "- **Constitution of Nepal (2015)** (Fundamental Rights, Duties, State Structure)\n"
+            "- **Labour Act, 2017** (Employment contracts, probation, leave, overtime, termination)\n"
+            "- **Muluki Civil & Penal Codes, 2017** (Contracts, marriage/divorce, criminal offenses)\n"
+            "- **Foreign Investment (FITTA 2019), Industrial Enterprises, Environment Protection, NHRC, and Prevention of Corruption Acts**\n\n"
+            "*Try clicking one of the suggested questions below or typing a specific legal question!*"
+        )
+    return None
 
 SYSTEM_INSTRUCTION = """You are a precise legal assistant answering questions about the legal provisions of Nepal.
 You must answer strictly and solely using the facts provided in the numbered sources below.
@@ -148,6 +176,7 @@ class LLMClient:
 
         if self.provider == "gemini":
             from google import genai
+            from google.genai import types
 
             client = genai.Client(api_key=self.api_key)
             models_to_try = [self.model]
@@ -161,33 +190,65 @@ class LLMClient:
                     response = client.models.generate_content(
                         model=model_name,
                         contents=prompt,
-                        config={"system_instruction": system, "temperature": self.temperature},
+                        config=types.GenerateContentConfig(
+                            system_instruction=system,
+                            temperature=self.temperature,
+                            thinking_config=types.ThinkingConfig(thinking_budget=0),
+                        ),
                     )
                     return response.text or ""
                 except Exception as err:  # noqa: BLE001
                     logger.warning("Gemini model %s failed: %s; trying next fallback", model_name, err)
                     last_err = err
 
+            # Fast cross-provider fallback to Groq if available
+            groq_key = os.getenv("GROQ_API_KEY")
+            if groq_key:
+                try:
+                    from groq import Groq
+
+                    g_client = Groq(api_key=groq_key)
+                    completion = g_client.chat.completions.create(
+                        model="openai/gpt-oss-120b",
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=self.temperature,
+                    )
+                    return completion.choices[0].message.content or ""
+                except Exception as groq_err:  # noqa: BLE001
+                    logger.warning("Groq fallback also failed: %s", groq_err)
+
             logger.error("All Gemini model attempts failed: %s", last_err)
             raise last_err
 
         elif self.provider == "groq":
-            try:
-                from groq import Groq
+            from groq import Groq
 
-                client = Groq(api_key=self.api_key)
-                completion = client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=self.temperature,
-                )
-                return completion.choices[0].message.content or ""
-            except Exception as err:
-                logger.error("Groq API call failed: %s", err)
-                raise
+            client = Groq(api_key=self.api_key)
+            models_to_try = [self.model]
+            for candidate in ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"):
+                if candidate not in models_to_try:
+                    models_to_try.append(candidate)
+
+            last_err = None
+            for model_name in models_to_try:
+                try:
+                    completion = client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=self.temperature,
+                    )
+                    return completion.choices[0].message.content or ""
+                except Exception as err:  # noqa: BLE001
+                    logger.warning("Groq model %s failed: %s; trying next fallback", model_name, err)
+                    last_err = err
+            logger.error("All Groq model attempts failed: %s", last_err)
+            raise last_err
 
         elif self.provider == "openai":
             try:

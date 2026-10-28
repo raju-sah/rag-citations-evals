@@ -89,6 +89,19 @@ def run_browser_tests():
         assert old_clear_btn.count() == 0, "Old 'Clear Question' button still present!"
         print("  ✓ Confirmed: External 'Run RAG Pipeline' and 'Clear Question' buttons removed.")
 
+        # Test 3.5: Instant Conversational Greeting ('hi there')
+        print("\n--- Test 3.5: Instant Conversational Greeting ('hi there') ---")
+        textarea = page.locator("textarea").first
+        textarea.fill("hi there")
+        time.sleep(0.3)
+        t0 = time.perf_counter()
+        submit_btn = page.locator("button[data-testid='stChatInputSubmitButton']")
+        submit_btn.click()
+        page.wait_for_selector(".status-pill-ok:has-text('Instant Conversational Assistant')", timeout=5000)
+        elapsed_hi = time.perf_counter() - t0
+        check_no_exceptions("After 'hi there' Submission")
+        print(f"  ✓ 'hi there' answered in {elapsed_hi:.2f}s (browser round-trip) with Instant Conversational badge!")
+
         # Test 4: Chip Click for Nepali Query & Execution via Embedded Submit Button
         print("\n--- Test 4: Nepali Query Selection & Pipeline Execution ---")
         nepali_chip = page.locator("button:has-text('नेपालको संविधानको धारा १६')")
@@ -102,22 +115,19 @@ def run_browser_tests():
         submit_btn = page.locator("button[data-testid='stChatInputSubmitButton']")
         submit_btn.click()
 
-        # Wait for RAG pipeline to complete and render status badge
+        # Wait for RAG pipeline to complete and render status badge (must be .status-pill-ok, NOT a refusal!)
         print("  Waiting for RAG response...")
-        page.wait_for_selector(".status-pill-ok, .status-pill-warn", timeout=45000)
+        page.wait_for_selector(".status-pill-ok:has-text('sentences cited')", timeout=45000)
         time.sleep(1)
         check_no_exceptions("After RAG Pipeline Execution")
 
-        # Verify answer rendered
-        answer_text = page.locator("div[data-testid='stMarkdownContainer'] p").all_inner_texts()
-        print(f"  Answer paragraphs found: {len(answer_text)}")
-        assert any("धारा १६" in p or "सम्मानपूर्वक" in p or "हक" in p for p in answer_text), "Expected Nepali legal answer text!"
-        print("  ✓ Answer contains expected Nepali legal text.")
-
-        # Verify citation status badge rendered
-        status_pill = page.locator(".status-pill-ok, .status-pill-warn")
-        assert status_pill.count() > 0, "Citation validation badge not found!"
+        # Verify citation status badge is .status-pill-ok (not refusal) and .cite-badge pills rendered
+        status_pill = page.locator(".status-pill-ok:has-text('sentences cited')")
+        assert status_pill.count() > 0, "Expected cited Nepali answer (.status-pill-ok), not refusal!"
         print(f"  ✓ Validation badge: '{status_pill.first.inner_text()}'")
+        cite_badges = page.locator(".cite-badge")
+        assert cite_badges.count() > 0, "Expected inline .cite-badge elements in answer!"
+        print(f"  ✓ Found {cite_badges.count()} inline .cite-badge elements.")
 
         # Verify sources drawer
         expanders = page.locator("div[data-testid='stExpander']")
@@ -158,12 +168,12 @@ def run_browser_tests():
         submit_btn = page.locator("button[data-testid='stChatInputSubmitButton']")
         submit_btn.click()
         print("  Waiting for refusal response and validation badge...")
-        page.wait_for_selector(".status-pill-ok, .status-pill-warn", timeout=45000)
+        page.wait_for_selector(".status-pill-warn:has-text('Refusal Triggered')", timeout=45000)
         time.sleep(1)
         check_no_exceptions("After Refusal Pipeline Execution")
 
         # Verify status badge rendered
-        status_pill = page.locator(".status-pill-ok, .status-pill-warn")
+        status_pill = page.locator(".status-pill-warn:has-text('Refusal Triggered')")
         assert status_pill.count() > 0, "Validation status badge not found!"
         print(f"  ✓ Status badge detected: '{status_pill.first.inner_text()}'")
 
