@@ -43,13 +43,13 @@ Target headline: *"hybrid + reranker raised Recall@5 from 0.62 → 0.86 and fait
 ## Steps
 
 ### Phase 1 — Pipeline (Week 1)
-- [ ] 1. **Ingest corpus**: Download Constitution, ~12 Acts, and Muluki Codes from Law Commission into `data/raw/`. Run 1-hour Nepali PDF extraction spike to determine if Nepali docs are clean Unicode.
-- [ ] 2. **Structure-aware chunker** (`src/ragcite/chunk.py`, `ingest.py`): Extract hierarchy (Act › Chapter › Section/Article), split large sections at subsection boundaries (max 500 tokens), merge tiny definitions (<80 tokens), prepend header path. Persist `data/processed/chunks.jsonl`.
-- [ ] 3. **Index builder** (`src/ragcite/index.py`): Kaggle script/local fallback to produce `bge-m3` FAISS index + `bm25s` sparse index. Persist to `data/index/`.
-- [ ] 4. **Retrieve & rerank** (`src/ragcite/retrieve.py`, `rerank.py`): Hybrid top-20 with language routing (Devanagari → dense-only; English → RRF k=60) → `bge-reranker-v2-m3` cross-encoder → top-5. Benchmark CPU rerank latency.
-- [ ] 5. **Generate with citations** (`src/ragcite/generate.py`): Prompt with numbered sources `[1]..[5]`, strict sentence-level citation requirement, refusal on unsupported questions. Disk-cached LLM client.
-- [ ] 6. **Citation parser & validator** (`src/ragcite/citations.py`): Parse `[n]` citations per sentence, validate source bounds, compute structural citation recall.
-- [ ] 7. **Streamlit UI** (`app/streamlit_app.py`): Tab 1 interactive demo with citation badges, sources drawer, and reranker toggle; Tab 2 ablation viewer.
+- [x] 1. **Ingest corpus**: Download Constitution, ~12 Acts, and Muluki Codes from Law Commission into `data/raw/`. Run 1-hour Nepali PDF extraction spike to determine if Nepali docs are clean Unicode.
+- [x] 2. **Structure-aware chunker** (`src/ragcite/chunk.py`, `ingest.py`): Extract hierarchy (Act › Chapter › Section/Article), split large sections at subsection boundaries (max 500 tokens), merge tiny definitions (<80 tokens), prepend header path. Persist `data/processed/chunks.jsonl`.
+- [x] 3. **Index builder** (`src/ragcite/index.py`): Kaggle script/local fallback to produce `bge-m3` FAISS index + `bm25s` sparse index. Persist to `data/index/`.
+- [x] 4. **Retrieve & rerank** (`src/ragcite/retrieve.py`, `rerank.py`): Hybrid top-20 with language routing (Devanagari → dense-only; English → RRF k=60) → `bge-reranker-v2-m3` cross-encoder → top-5. Benchmark CPU rerank latency.
+- [x] 5. **Generate with citations** (`src/ragcite/generate.py`): Prompt with numbered sources `[1]..[5]`, strict sentence-level citation requirement, refusal on unsupported questions. Disk-cached LLM client.
+- [x] 6. **Citation parser & validator** (`src/ragcite/citations.py`): Parse `[n]` citations per sentence, validate source bounds, compute structural citation recall.
+- [x] 7. **Streamlit UI** (`app/streamlit_app.py`): Tab 1 interactive demo with citation badges, sources drawer, and reranker toggle; Tab 2 ablation viewer.
 
 ### Phase 2 — Evals & ablations (Week 2)
 - [ ] 8. **Golden eval set** (`evals/golden/`): 200+ questions (~150 dev, ~50 test) with reference answers + gold section IDs. 25–30% Nepali, 15% unanswerable, 15% multi-section. LLM-drafted + hand-verified. Create 40-item calibration set.

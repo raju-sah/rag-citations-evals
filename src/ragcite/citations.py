@@ -1,7 +1,8 @@
 """Citation parsing and structural validation.
 
-Semantic validation (does chunk [n] actually support the sentence?) lives in
-``ragcite.evals`` and uses an NLI model or an LLM judge.
+Supports both Latin sentence punctuation (. ! ?) and Devanagari danda (।).
+Semantic entailment validation (does chunk [n] actually support the claim?)
+lives in ``ragcite.evals``.
 """
 
 from __future__ import annotations
@@ -10,18 +11,43 @@ import re
 from dataclasses import dataclass, field
 
 _CITE_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
-_SENT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(\[])")
+_SENT_RE = re.compile(r"(?<=[.!?।])\s+(?=[A-Z0-9\"'(\[\u0900-\u097f])")
+
+REFUSAL_PHRASES = [
+    "do not contain sufficient information",
+    "does not contain sufficient information",
+    "not enough information in the provided sources",
+    "पर्याप्त जानकारी उपलब्ध छैन",
+    "उल्लेख गरिएको छैन",
+]
 
 
 @dataclass
 class CitedSentence:
+    """A sentence parsed from an answer, along with its cited source indices."""
+
     text: str
     citations: list[int] = field(default_factory=list)
 
+    @property
+    def clean_text(self) -> str:
+        """Text of sentence with [n] citation tags stripped."""
+        return _CITE_RE.sub("", self.text).strip()
+
+
+def is_refusal(answer: str) -> bool:
+    """Check if the answer is a model refusal."""
+    lower = answer.lower()
+    return any(p in lower or p in answer for p in REFUSAL_PHRASES)
+
 
 def split_sentences(answer: str) -> list[str]:
-    """Naive sentence splitter; good enough for citation checks."""
-    return [s.strip() for s in _SENT_RE.split(answer.strip()) if s.strip()]
+    """Sentence splitter handling both English punctuation (. ! ?) and Devanagari purna viram (।)."""
+    normalized = answer.strip()
+    if not normalized:
+        return []
+    parts = _SENT_RE.split(normalized)
+    return [s.strip() for s in parts if s.strip()]
 
 
 def parse_citations(answer: str) -> list[CitedSentence]:
@@ -30,22 +56,41 @@ def parse_citations(answer: str) -> list[CitedSentence]:
     for sent in split_sentences(answer):
         nums: list[int] = []
         for group in _CITE_RE.findall(sent):
-            nums.extend(int(x) for x in group.split(","))
+            nums.extend(int(x.strip()) for x in group.split(",") if x.strip())
         out.append(CitedSentence(text=sent, citations=nums))
     return out
 
 
 def validate_citations(answer: str, num_sources: int) -> dict:
-    """Structural checks: every cited index exists, and every sentence has a citation."""
+    """Structural checks: every cited index exists, and every non-refusal sentence has a citation."""
     sents = parse_citations(answer)
     all_cites = [c for s in sents for c in s.citations]
     invalid = sorted({c for c in all_cites if c < 1 or c > num_sources})
     uncited = [s.text for s in sents if not s.citations]
+
+    refused = is_refusal(answer)
+    if refused:
+        # Refusal answers validly do not require citations
+        structural_recall = 1.0
+        is_valid = not invalid
+    else:
+        structural_recall = (
+            (len(sents) - len(uncited)) / len(sents) if sents else 0.0
+        )
+        is_valid = not invalid and not uncited
+
+    structural_precision = (
+        (len(all_cites) - len(invalid)) / len(all_cites) if all_cites else 1.0
+    )
+
     return {
         "num_sentences": len(sents),
         "num_citations": len(all_cites),
         "invalid_citations": invalid,
         "uncited_sentences": uncited,
-        "structural_citation_recall": (len(sents) - len(uncited)) / len(sents) if sents else 0.0,
-        "valid": not invalid and not uncited,
+        "structural_citation_recall": structural_recall,
+        "structural_citation_precision": structural_precision,
+        "is_refusal": refused,
+        "valid": is_valid,
     }
+
