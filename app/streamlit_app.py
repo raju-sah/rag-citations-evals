@@ -129,6 +129,10 @@ with tab_qa:
         if chosen:
             st.session_state["query_text"] = chosen
 
+    def clear_query():
+        st.session_state["query_text"] = ""
+        st.session_state["chip_selection"] = None
+
     # Expanding textarea for long or multi-clause legal questions
     query_input = st.text_area(
         "Enter your legal question:",
@@ -164,10 +168,7 @@ with tab_qa:
             disabled=(retriever is None or not query_input.strip()),
         )
     with btn_col2:
-        if st.button("Clear Question"):
-            st.session_state["query_text"] = ""
-            st.session_state["chip_selection"] = None
-            st.rerun()
+        st.button("Clear Question", on_click=clear_query)
 
     if run_submitted:
         with st.spinner("Retrieving candidates & generating cited answer..."):
