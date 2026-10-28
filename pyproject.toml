@@ -6,18 +6,19 @@ requires-python = ">=3.10"
 dependencies = [
     "pyyaml",
     "numpy",
+    "tqdm",
 ]
 
 [project.optional-dependencies]
 rag = [
     "sentence-transformers",
     "faiss-cpu",
-    "rank-bm25",
+    "bm25s",
     "pypdf",
-    "tiktoken",
+    "transformers",
 ]
-llm = ["google-genai", "openai"]
-evals = ["ragas", "pandas"]
+llm = ["google-genai", "groq", "openai"]
+evals = ["ragas", "pandas", "scikit-learn"]
 ui = ["streamlit"]
 dev = ["pytest", "ruff"]
 

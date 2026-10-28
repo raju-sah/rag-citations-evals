@@ -1,77 +1,65 @@
 # PLAN — RAG with Citations and Evals
 
-> Project 1 of 3 · Difficulty ⭐⭐ · GPU: optional (0–5 h Kaggle) · Weeks 1–2
+> Project 1 of 3 · Difficulty ⭐⭐ · GPU: optional (1–2 h Kaggle T4 for batch embedding/rerank caching) · Weeks 1–2
 
 ## What it is
 
-Retrieval-Augmented Generation: the user asks a question, we retrieve relevant chunks from
-our documents, and the LLM answers **using only those chunks**. Every claim cites the chunk it
-came from, e.g. `[2]`. Evals measure (a) whether retrieval found the right chunks and (b)
+Retrieval-Augmented Generation: the user asks a question (in English or Nepali), we retrieve relevant chunks from
+our legal corpus, and the LLM answers **using only those chunks**. Every claim cites the chunk it
+came from, e.g. `[2]`. Evals measure (a) whether retrieval found the right legal sections and (b)
 whether the answer is faithful to them.
 
 **Portfolio thesis:** the eval harness + ablation table matter more than the chat UI.
-Target headline: *"hybrid + reranker raised Recall@5 from 0.62 → 0.84 and faithfulness 0.71 → 0.90"*.
+Target headline: *"hybrid + reranker raised Recall@5 from 0.62 → 0.86 and faithfulness 0.71 → 0.92, while language-aware routing preserved Nepali retrieval accuracy"*.
 
-## Stack (one per row — ✅ = current default, to be confirmed in /grill-me)
+## Stack (Finalized via /grill-me)
 
-| Layer | Options | Default |
+| Layer | Selection | Rationale |
 |---|---|---|
-| Embeddings | `BAAI/bge-small-en-v1.5`, `bge-m3`, `intfloat/e5`, API embeddings | ✅ `bge-small-en-v1.5` (CPU-friendly) |
-| Vector store | FAISS / Chroma / LanceDB / Qdrant | ✅ FAISS (simple, no server) |
-| Keyword search | BM25 (`rank_bm25`) | ✅ BM25 + vectors → hybrid (RRF) |
-| Reranker | `BAAI/bge-reranker-v2-m3` | ✅ on (toggle for ablation) |
-| LLM | Gemini / OpenAI / Claude API, or local Qwen 3B–7B (Ollama/vLLM) | ✅ TBD |
-| Evals | RAGAS, DeepEval, own LLM-as-judge + metrics | ✅ own metrics + RAGAS |
-| UI | Streamlit / Gradio | ✅ Streamlit |
+| Corpus | Nepal Law (Constitution 2015 + ~12 key Acts + Muluki Codes) | Realistic legal structure (Part/Article/Section), low memorization in LLMs, high domain value. |
+| Embeddings | `BAAI/bge-m3` | Multilingual (EN + Nepali), 8192 context; embedded via Kaggle T4, fast query inference on CPU. |
+| Vector store | FAISS (`IndexFlatIP`) | Simple exact search on CPU, no server overhead, 100% deterministic. |
+| Keyword search | `bm25s` + language-aware routing | Fast sparse search with native disk serialization; Devanagari queries bypass BM25 to avoid noise. |
+| Reranker | `BAAI/bge-reranker-v2-m3` (top-20 → top-5) | State-of-the-art cross-encoder; batch scores cached for evals via Kaggle T4; CPU latency benchmarked for demo. |
+| LLM Generator | Google Gemini Flash (`temperature=0.0`) | Fast, capable in English and Nepali, strict instruction following; calls cached to disk. |
+| Judge LLM | Groq (`llama-3.3-70b-versatile`) + Gemini fallback | Cross-family evaluation to avoid self-preference bias; validated against 40 human calibration items (Cohen's κ). |
+| Evals | Own metrics + lightweight RAGAS cross-validation | ALCE citation precision/recall, JSON-schema LLM judge for faithfulness, retrieval metrics, 20-sample RAGAS check. |
+| UI | Streamlit 2-tab demo | Tab 1: Interactive Q&A with citation badges, sources drawer, and reranker toggle; Tab 2: Ablation dashboard. |
 
-## Open decisions (resolve before coding)
+## Resolved Decisions
 
-- [ ] **Corpus** — Nepal law docs? a framework's docs? research papers? college notes?
-- [ ] **LLM provider** — which API key is available (Gemini free tier is cheapest)?
-- [ ] **Judge LLM** — same as generator or a different/stronger model?
-- [ ] **Golden-set size** — 50 (fast) vs 200 (credible)
-- [ ] **Language** — English-only, or Nepali too (→ `bge-m3` multilingual)?
+- [x] **Corpus** — Nepal Law: English translations of Constitution 2015 + ~12 key Acts + Muluki Civil and Criminal Codes (~6–8k chunks).
+- [x] **Language** — Cross-lingual day one: English documents, English + Nepali queries (answering in query language). Nepali documents gated on a 1-hour extraction spike (clean Unicode).
+- [x] **LLM Generator** — Gemini Flash via free Google AI Studio key, with strict disk-based caching keyed on `(model, prompt)`.
+- [x] **Judge LLM** — Cross-family judge on Groq free tier (`llama-3.3-70b-versatile`) + 40-item human calibration set (reporting Cohen's κ); Gemini fallback for Nepali items if κ is low.
+- [x] **Golden-set size** — 200+ questions (~150 dev, ~50 held-out test), stratified mix (~25–30% Nepali, ~15% unanswerable, ~15% multi-section, paraphrased), section-level gold IDs.
+- [x] **Chunking strategy** — Structure-aware baseline (one chunk per Article/Section, max 500 tokens, sub-section splitting, header path prepended); fixed 300/500/800 windows as ablations.
+- [x] **Hybrid fusion** — RRF (k=60) + language-aware routing (Devanagari query → dense only); `bm25s` + FAISS FlatIP.
+- [x] **Compute & reranker** — Kaggle T4 (~1–2 GPU h) for corpus embeddings and golden-set rerank score caching; laptop CPU for query inference, UI demo, and eval execution.
+- [x] **Eval framework** — Own transparent metrics in `src/ragcite/evals/` (ALCE citation P/R, custom prompt-cached LLM judge, exact retrieval metrics) + 20-sample RAGAS correlation check.
+- [x] **Ablations** — 8 core rows (Baseline, Dense-only, BM25-only, Naive hybrid without routing, Reranker OFF, Fixed 500, Fixed 300, Fixed 800) + 1 prompt ablation.
+- [x] **UI scope** — 2-tab Streamlit app: (1) Q&A demo with inline citation badges, expandable sources drawer, and reranker toggle; (2) Ablations & metrics dashboard reading `experiments/ablations.csv`.
 
 ## Steps
 
 ### Phase 1 — Pipeline (Week 1)
-- [ ] 1. **Pick corpus**, drop raw files in `data/raw/`, document source + license in `data/README.md`.
-- [ ] 2. **Ingest & chunk** (`src/ragcite/ingest.py`, `chunk.py`): ~300–800 tokens, ~10–15% overlap.
-      Metadata per chunk: `doc_id, page, section, chunk_id`. Output `data/processed/chunks.jsonl`.
-- [ ] 3. **Index** (`index.py`): embedding index (FAISS) + BM25 index, persisted to `data/index/`.
-- [ ] 4. **Retrieve** (`retrieve.py`, `rerank.py`): hybrid top-20 (RRF fusion) → rerank → top-5.
-- [ ] 5. **Generate with citations** (`generate.py`): number chunks `[1]..[5]` in the prompt.
-      Instruction: *"Answer only from the sources. Cite every sentence with [n]. If the answer
-      isn't in the sources, say so."*
-- [ ] 6. **Validate citations** (`citations.py`): parse `[n]`, check each exists; optional NLI /
-      LLM-judge check that the cited chunk supports the sentence.
-- [ ] 7. **Streamlit UI** (`app/streamlit_app.py`): answer + clickable sources panel.
+- [ ] 1. **Ingest corpus**: Download Constitution, ~12 Acts, and Muluki Codes from Law Commission into `data/raw/`. Run 1-hour Nepali PDF extraction spike to determine if Nepali docs are clean Unicode.
+- [ ] 2. **Structure-aware chunker** (`src/ragcite/chunk.py`, `ingest.py`): Extract hierarchy (Act › Chapter › Section/Article), split large sections at subsection boundaries (max 500 tokens), merge tiny definitions (<80 tokens), prepend header path. Persist `data/processed/chunks.jsonl`.
+- [ ] 3. **Index builder** (`src/ragcite/index.py`): Kaggle script/local fallback to produce `bge-m3` FAISS index + `bm25s` sparse index. Persist to `data/index/`.
+- [ ] 4. **Retrieve & rerank** (`src/ragcite/retrieve.py`, `rerank.py`): Hybrid top-20 with language routing (Devanagari → dense-only; English → RRF k=60) → `bge-reranker-v2-m3` cross-encoder → top-5. Benchmark CPU rerank latency.
+- [ ] 5. **Generate with citations** (`src/ragcite/generate.py`): Prompt with numbered sources `[1]..[5]`, strict sentence-level citation requirement, refusal on unsupported questions. Disk-cached LLM client.
+- [ ] 6. **Citation parser & validator** (`src/ragcite/citations.py`): Parse `[n]` citations per sentence, validate source bounds, compute structural citation recall.
+- [ ] 7. **Streamlit UI** (`app/streamlit_app.py`): Tab 1 interactive demo with citation badges, sources drawer, and reranker toggle; Tab 2 ablation viewer.
 
 ### Phase 2 — Evals & ablations (Week 2)
-- [ ] 8. **Golden eval set** (`evals/golden/`): 50–200 questions with reference answers +
-      gold chunk IDs. LLM-generated, then **hand-verified**. Include ~10–15% *unanswerable* questions.
-- [ ] 9. **Eval harness** (`src/ragcite/evals/`): one command → one row in `experiments/ablations.csv`.
-- [ ] 10. **Ablations** — change ONE thing at a time:
-      chunk size (300/500/800) · k · BM25 vs dense vs hybrid · reranker on/off · prompt variant.
-- [ ] 11. **Write-up** in README: ablation table, plots, failure analysis, cost/latency.
-
-## Metrics
-
-| Layer | Metric |
-|---|---|
-| Retrieval | Recall@k, MRR, nDCG@k — did we fetch the right chunk? |
-| Generation | Faithfulness / groundedness, answer relevancy, correctness vs reference |
-| Citations | Citation precision (cited chunks support the claim?) & recall (every claim cited?) — see ALCE |
-| System | Latency, cost/query, refusal rate on unanswerable questions |
-
-## Compute
-
-Laptop CPU is enough. Use Kaggle (`kaggle/`) only to embed a very large corpus or run a
-local 7B LLM. Budget: 0–5 GPU h out of ~30 h/week.
+- [ ] 8. **Golden eval set** (`evals/golden/`): 200+ questions (~150 dev, ~50 test) with reference answers + gold section IDs. 25–30% Nepali, 15% unanswerable, 15% multi-section. LLM-drafted + hand-verified. Create 40-item calibration set.
+- [ ] 9. **Eval harness** (`src/ragcite/evals/`): Retrieval metrics (Recall@k, MRR, nDCG@k), ALCE citation precision/recall, JSON-schema LLM judge for faithfulness & answer relevancy, Cohen's κ calculation. Optional 20-sample RAGAS check.
+- [ ] 10. **Run 8 ablations**: Log rows to `experiments/ablations.csv` with bootstrap 95% confidence intervals.
+- [ ] 11. **Write-up** in README: Ablation table, plots, failure analysis, cost/latency breakdown.
 
 ## Definition of done
 
-- [ ] `make eval` (or `python -m ragcite.evals.run`) reproduces the ablation table end-to-end
-- [ ] ≥ 5 ablation rows with retrieval + generation + citation metrics
-- [ ] Streamlit demo + screenshot/GIF in README
-- [ ] Short write-up: what helped, what didn't, failure examples
+- [ ] `python -m ragcite.evals.run` reproduces all 8+ ablation rows end-to-end
+- [ ] Judge calibration demonstrates high agreement (Cohen's κ > 0.75) with human labels
+- [ ] Streamlit 2-tab demo working with screenshot/GIF in README
+- [ ] Detailed write-up: what helped, what failed (e.g. naive hybrid on Nepali queries), and latency/cost trade-offs
