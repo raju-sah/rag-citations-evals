@@ -61,6 +61,12 @@ st.markdown(
         display: inline-block;
         margin-bottom: 12px;
     }
+    /* Hide Deploy button */
+    .stAppDeployButton,
+    div[data-testid="stAppDeployButton"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
     /* Claude-style embedded chat input (seamless borderless design) */
     div[data-testid="stChatInput"] {
         border-radius: 18px !important;
