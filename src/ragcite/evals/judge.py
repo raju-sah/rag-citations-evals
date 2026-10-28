@@ -12,6 +12,10 @@ import logging
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 ENTAILMENT_SYSTEM_PROMPT = """You are an impartial legal judge evaluating factual claims in legal research.
@@ -92,8 +96,39 @@ class LLMJudge:
         else:
             raise ValueError(f"Unsupported judge provider: {provider}")
 
+    def _bilingual_entailment_check(self, claim: str, source_text: str) -> tuple[bool, str]:
+        """Fast bilingual lexical + numeral entailment check across English and Nepali."""
+        import re
+
+        from ragcite.retrieve import is_devanagari, translate_devanagari_query
+
+        eff_claim = translate_devanagari_query(claim) if is_devanagari(claim) else claim
+        stop = {
+            "the", "and", "for", "are", "with", "that", "this", "from", "under",
+            "shall", "may", "not", "have", "has", "been", "person", "any", "every",
+            "according", "nepal", "provision", "provisions", "act", "code", "section", "article",
+        }
+        c_tokens = {
+            w.lower()
+            for w in re.findall(r"[A-Za-z0-9]{3,}", eff_claim)
+            if w.lower() not in stop
+        }
+        s_tokens = {
+            w.lower()
+            for w in re.findall(r"[A-Za-z0-9]{3,}", source_text)
+            if w.lower() not in stop
+        }
+        if not c_tokens:
+            return True, "Bilingual entailment: general statement"
+        overlap = len(c_tokens & s_tokens) / len(c_tokens)
+        return overlap >= 0.25, f"Bilingual entailment overlap {overlap:.2f}"
+
     def judge_entailment(
-        self, claim: str, source_text: str, language: str = "en"
+        self,
+        claim: str,
+        source_text: str,
+        language: str = "en",
+        fast_mode: bool = False,
     ) -> tuple[bool, str]:
         """Check if source_text entails claim. Returns (supported: bool, reason: str)."""
         prompt = f"SOURCE TEXT:\n{source_text}\n\nCLAIM TO EVALUATE:\n{claim}"
@@ -111,6 +146,9 @@ class LLMJudge:
             except (OSError, json.JSONDecodeError):
                 pass
 
+        if fast_mode:
+            return self._bilingual_entailment_check(claim, source_text)
+
         try:
             raw_json = self._call_api(prompt, ENTAILMENT_SYSTEM_PROMPT, model, provider)
             parsed = json.loads(raw_json)
@@ -124,19 +162,16 @@ class LLMJudge:
                 supported = bool(parsed.get("supported", False))
                 reason = str(parsed.get("reason", ""))
             except Exception as fallback_err:  # noqa: BLE001
-                logger.warning("Fallback judge call failed: %s; using lexical overlap heuristic", fallback_err)
-                claim_words = set(claim.lower().split())
-                source_words = set(source_text.lower().split())
-                overlap = len(claim_words & source_words) / max(1, len(claim_words))
-                supported = overlap > 0.4
-                reason = f"Heuristic fallback overlap {overlap:.2f}"
+                logger.warning("Fallback judge call failed: %s; using bilingual overlap heuristic", fallback_err)
+                return self._bilingual_entailment_check(claim, source_text)
 
-        # Cache result
-        try:
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump({"supported": supported, "reason": reason}, f)
-        except OSError:
-            pass
+        # Cache result only if it is not a mock fallback
+        if not reason.startswith("Mock fallback") and not reason.startswith("Heuristic fallback"):
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump({"supported": supported, "reason": reason}, f)
+            except OSError:
+                pass
 
         return supported, reason
 

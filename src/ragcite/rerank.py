@@ -90,17 +90,30 @@ class CrossEncoderReranker:
 
     def score_pairs(self, query: str, candidates: Sequence[RetrievedCandidate]) -> list[float]:
         """Score (query, candidate.text) pairs using cache where possible."""
-        from ragcite.retrieve import is_devanagari, translate_devanagari_query
+        import math
+
+        from ragcite.retrieve import (
+            expand_legal_query,
+            is_devanagari,
+            translate_devanagari_query,
+        )
 
         scores: list[float] = []
         uncached_indices: list[int] = []
         uncached_pairs: list[tuple[str, str]] = []
-        effective_query = translate_devanagari_query(query) if is_devanagari(query) else query
+        effective_query = (
+            translate_devanagari_query(query)
+            if is_devanagari(query)
+            else expand_legal_query(query)
+        )
 
         for idx, cand in enumerate(candidates):
-            key = f"{query}::{cand.chunk_id}"
+            key = f"{effective_query}::{cand.chunk_id}"
             if key in self.cache:
-                scores.append(self.cache[key])
+                val = float(self.cache[key])
+                if val < 0.0 or val > 1.0:
+                    val = 1.0 / (1.0 + math.exp(-max(-20.0, min(20.0, val))))
+                scores.append(val)
             else:
                 scores.append(0.0)  # placeholder
                 uncached_indices.append(idx)
@@ -115,9 +128,15 @@ class CrossEncoderReranker:
                 new_scores = new_scores.tolist()
 
             for idx, score_val in zip(uncached_indices, new_scores):
-                score = float(score_val)
+                raw_score = float(score_val)
+                # Normalize raw logits to (0, 1) probability scale
+                score = (
+                    1.0 / (1.0 + math.exp(-max(-20.0, min(20.0, raw_score))))
+                    if (raw_score < 0.0 or raw_score > 1.0)
+                    else raw_score
+                )
                 scores[idx] = score
-                key = f"{query}::{candidates[idx].chunk_id}"
+                key = f"{effective_query}::{candidates[idx].chunk_id}"
                 self.cache[key] = score
 
             if self.cache_path:
@@ -154,6 +173,7 @@ class CrossEncoderReranker:
                     dense_rank=cand.dense_rank,
                     bm25_rank=cand.bm25_rank,
                     final_rank=rank,
+                    all_section_ids=cand.all_section_ids,
                 )
             )
         return reranked

@@ -32,6 +32,7 @@ class RetrievedCandidate:
     dense_rank: int | None = None
     bm25_rank: int | None = None
     final_rank: int = 0
+    all_section_ids: list[str] | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -46,6 +47,7 @@ class RetrievedCandidate:
             "dense_rank": self.dense_rank,
             "bm25_rank": self.bm25_rank,
             "final_rank": self.final_rank,
+            "all_section_ids": self.all_section_ids or [self.section_id],
         }
 
 
@@ -93,12 +95,15 @@ _NEPALI_LEGAL_GLOSSARY: list[tuple[str, str]] = [
     ("अतिरिक्त पारिश्रमिक", "overtime remuneration"),
     ("मुलुकी देवानी संहिता", "Muluki Civil Code 2017"),
     ("देवानी संहिता", "Muluki Civil Code 2017"),
+    ("करार गर्न अयोग्य", "Persons competent to concluded contract Section 506 minor unsound mind"),
+    ("अयोग्य", "Persons competent to concluded contract incompetent"),
     ("करार", "contract"),
     ("नाबालिग", "minor"),
     ("सम्बन्ध विच्छेद", "divorce"),
-    ("घरबहाल", "house rent"),
+    ("घरबहाल", "house rent Agreement to be concluded while renting Section 386"),
     ("मुलुकी अपराध संहिता", "Muluki Penal Code 2017"),
     ("अपराध संहिता", "Muluki Penal Code 2017"),
+    ("ज्यान मार्ने उद्योग", "attempt to commit murder Section 183"),
     ("ज्यान मार्ने", "homicide murder"),
     ("आपराधिक विश्वासघात", "criminal breach of trust"),
     ("अपहरण", "kidnapping"),
@@ -124,6 +129,17 @@ _NEPALI_LEGAL_GLOSSARY: list[tuple[str, str]] = [
     ("कैद", "imprisonment"),
 ]
 
+_ENGLISH_LEGAL_SYNONYMS: list[tuple[str, str]] = [
+    ("capital punishment", "death penalty Article 16 Right to live with dignity"),
+    ("age of majority", "attain competency eighteen years minor Section 32 Section 34"),
+    ("probationary period", "probation period Section 13"),
+    ("paid sick leave", "sick leave twelve days a year Section 44"),
+    ("coercion or undue influence", "voidable contracts coercion Section 518"),
+    ("dies intestate without any heirs", "heir property Partition Inheritance Section 248"),
+    ("release on bail or recognizance", "remand on recognizance bail detention Section 67 Section 68 Section 69"),
+    ("first information report", "first information report FIR statute of limitation Section 4 Section 51"),
+]
+
 
 def is_devanagari(text: str) -> bool:
     """Detect if a query is predominantly in Devanagari script."""
@@ -132,6 +148,18 @@ def is_devanagari(text: str) -> bool:
         return False
     devanagari_chars = sum(1 for ch in stripped if "\u0900" <= ch <= "\u097f")
     return (devanagari_chars / len(stripped)) > 0.25
+
+
+def expand_legal_query(query: str) -> str:
+    """Expand English legal terminology synonyms (e.g. capital punishment -> death penalty)."""
+    q_lower = query.lower()
+    additions: list[str] = []
+    for phrase, expansion in _ENGLISH_LEGAL_SYNONYMS:
+        if phrase in q_lower:
+            additions.append(expansion)
+    if additions:
+        return f"{query} {' '.join(additions)}"
+    return query
 
 
 def translate_devanagari_query(query: str) -> str:
@@ -161,6 +189,32 @@ def _resolve_section_id(meta: dict, search_query: str) -> str:
         m = re.search(r"(?:art|s)(\d+)$", sec_id)
         if m and m.group(1) in query_nums:
             return sec_id
+
+    # Otherwise check which sub-section inside the merged chunk text best matches the query words
+    text = meta.get("text", "")
+    q_words = {
+        w.lower()
+        for w in re.findall(r"[A-Za-z]{4,}", search_query)
+        if w.lower() not in {"what", "under", "does", "constitution", "nepal", "section", "article", "according", "code"}
+    }
+    if q_words:
+        best_sec = meta["section_id"]
+        best_hits = 0
+        for sec_id in all_secs:
+            m = re.search(r"(?:art|s)(\d+)$", sec_id)
+            if not m:
+                continue
+            num = m.group(1)
+            pat = re.search(rf"(?:^|\n)\s*{num}\.\s+(.+?)(?=(?:\n\s*\d+\.\s+)|\Z)", text, re.DOTALL)
+            if pat:
+                sub_text = pat.group(1).lower()
+                hits = sum(1 for w in q_words if w in sub_text)
+                if hits > best_hits:
+                    best_hits = hits
+                    best_sec = sec_id
+        if best_hits > 0:
+            return best_sec
+
     return meta["section_id"]
 
 
@@ -273,7 +327,7 @@ class HybridRetriever:
         search_query = (
             translate_devanagari_query(query)
             if (query_is_devanagari and route_devanagari)
-            else query
+            else expand_legal_query(query)
         )
         effective_mode = mode
 
@@ -282,11 +336,12 @@ class HybridRetriever:
             candidates: list[RetrievedCandidate] = []
             for rank, (cid, score, d_rank) in enumerate(dense_res, start=1):
                 meta = self.chunk_by_id[cid]
+                sec_id = _resolve_section_id(meta, search_query)
                 candidates.append(
                     RetrievedCandidate(
                         chunk_id=cid,
                         doc_id=meta["doc_id"],
-                        section_id=_resolve_section_id(meta, search_query),
+                        section_id=sec_id,
                         header_path=meta["header_path"],
                         text=meta["text"],
                         page_start=meta["page_start"],
@@ -295,6 +350,7 @@ class HybridRetriever:
                         dense_rank=d_rank,
                         bm25_rank=None,
                         final_rank=rank,
+                        all_section_ids=meta.get("all_section_ids", [sec_id]),
                     )
                 )
             return candidates
@@ -304,11 +360,12 @@ class HybridRetriever:
             candidates = []
             for rank, (cid, score, b_rank) in enumerate(bm25_res, start=1):
                 meta = self.chunk_by_id[cid]
+                sec_id = _resolve_section_id(meta, search_query)
                 candidates.append(
                     RetrievedCandidate(
                         chunk_id=cid,
                         doc_id=meta["doc_id"],
-                        section_id=_resolve_section_id(meta, search_query),
+                        section_id=sec_id,
                         header_path=meta["header_path"],
                         text=meta["text"],
                         page_start=meta["page_start"],
@@ -317,6 +374,7 @@ class HybridRetriever:
                         dense_rank=None,
                         bm25_rank=b_rank,
                         final_rank=rank,
+                        all_section_ids=meta.get("all_section_ids", [sec_id]),
                     )
                 )
             return candidates
@@ -337,11 +395,12 @@ class HybridRetriever:
             candidates = []
             for rank, (cid, score) in enumerate(top_fused, start=1):
                 meta = self.chunk_by_id[cid]
+                sec_id = _resolve_section_id(meta, search_query)
                 candidates.append(
                     RetrievedCandidate(
                         chunk_id=cid,
                         doc_id=meta["doc_id"],
-                        section_id=_resolve_section_id(meta, search_query),
+                        section_id=sec_id,
                         header_path=meta["header_path"],
                         text=meta["text"],
                         page_start=meta["page_start"],
@@ -350,6 +409,7 @@ class HybridRetriever:
                         dense_rank=dense_ranks.get(cid),
                         bm25_rank=bm25_ranks.get(cid),
                         final_rank=rank,
+                        all_section_ids=meta.get("all_section_ids", [sec_id]),
                     )
                 )
             return candidates

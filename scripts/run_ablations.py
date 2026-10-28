@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 
 from ragcite.evals.run import run_eval
+from ragcite.generate import RELAXED_SYSTEM_INSTRUCTION
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -128,6 +129,7 @@ def main():
     run_eval(
         split="dev",
         override_run_name="prompt_relaxed_citation",
+        override_system_prompt=RELAXED_SYSTEM_INSTRUCTION,
         skip_generation=False,
         max_eval_items=40,
     )

@@ -16,9 +16,21 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from ragcite.retrieve import RetrievedCandidate
 
+load_dotenv()
+
 logger = logging.getLogger(__name__)
+
+_GEMINI_QUOTA_EXHAUSTED = False
+_GROQ_MODELS = (
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+)
+_GROQ_CALL_COUNTER = 0
 
 _GREETING_PATTERNS = re.compile(
     r"^\s*(?:hi|hello|hey|hi\s+there|hello\s+there|hey\s+there|namaste|namaskar|"
@@ -57,6 +69,12 @@ Strict Citation Rules:
 4. If the provided sources do NOT contain enough information to answer the question, do not speculate or extrapolate from external knowledge. You MUST respond with:
 "The provided sources do not contain sufficient information to answer this question."
 5. If the user's question is in Nepali, answer in Nepali while continuing to cite the numbered sources using standard [n] citations.
+"""
+
+RELAXED_SYSTEM_INSTRUCTION = """You are a helpful legal assistant answering questions about the legal provisions of Nepal.
+Use the provided numbered sources below to answer the user's question clearly and concisely.
+Include citations like [1] when referencing specific provisions, and if the sources do not address the question, state that the provided sources do not contain sufficient information to answer this question.
+If the user's question is in Nepali, answer in Nepali.
 """
 
 
@@ -127,13 +145,16 @@ class LLMClient:
             return os.getenv("OPENAI_API_KEY")
         return None
 
-    def _cache_key(self, prompt: str) -> str:
-        raw = f"{self.provider}:{self.model}:{self.temperature}:{prompt}"
+    def _cache_key(self, prompt: str, system: str = SYSTEM_INSTRUCTION) -> str:
+        if system == SYSTEM_INSTRUCTION:
+            raw = f"{self.provider}:{self.model}:{self.temperature}:{prompt}"
+        else:
+            raw = f"{self.provider}:{self.model}:{self.temperature}:{system}:{prompt}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def generate(self, prompt: str, system: str = SYSTEM_INSTRUCTION) -> tuple[str, bool, float]:
         """Generate response with disk caching. Returns (response_text, is_cached, latency_s)."""
-        cache_file = self.cache_dir / f"{self._cache_key(prompt)}.json"
+        cache_file = self.cache_dir / f"{self._cache_key(prompt, system=system)}.json"
         if cache_file.exists():
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
@@ -146,27 +167,30 @@ class LLMClient:
         response_text = self._call_provider(prompt, system=system)
         duration_s = time.perf_counter() - start_time
 
-        # Save to disk cache
-        try:
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "provider": self.provider,
-                        "model": self.model,
-                        "prompt": prompt,
-                        "text": response_text,
-                        "latency_s": duration_s,
-                    },
-                    f,
-                    ensure_ascii=False,
-                )
-        except OSError as err:
-            logger.warning("Failed to write LLM cache: %s", err)
+        # Save to disk cache only if real API key was used
+        if self.api_key:
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "provider": self.provider,
+                            "model": self.model,
+                            "prompt": prompt,
+                            "text": response_text,
+                            "latency_s": duration_s,
+                        },
+                        f,
+                        ensure_ascii=False,
+                    )
+            except OSError as err:
+                logger.warning("Failed to write LLM cache: %s", err)
 
         return response_text, False, duration_s
 
     def _call_provider(self, prompt: str, system: str) -> str:
-        """Call external LLM API."""
+        """Call external LLM API with circuit-breaker and multi-model load balancing."""
+        global _GEMINI_QUOTA_EXHAUSTED, _GROQ_CALL_COUNTER
+
         if not self.api_key:
             logger.warning("No API key configured for provider '%s'. Returning mock response.", self.provider)
             return (
@@ -175,20 +199,14 @@ class LLMClient:
             )
 
         if self.provider == "gemini":
-            from google import genai
-            from google.genai import types
+            if not _GEMINI_QUOTA_EXHAUSTED:
+                from google import genai
+                from google.genai import types
 
-            client = genai.Client(api_key=self.api_key)
-            models_to_try = [self.model]
-            for candidate in ("gemini-3-flash-preview", "gemini-3.5-flash"):
-                if candidate not in models_to_try:
-                    models_to_try.append(candidate)
-
-            last_err = None
-            for model_name in models_to_try:
+                client = genai.Client(api_key=self.api_key)
                 try:
                     response = client.models.generate_content(
-                        model=model_name,
+                        model=self.model,
                         contents=prompt,
                         config=types.GenerateContentConfig(
                             system_instruction=system,
@@ -198,30 +216,37 @@ class LLMClient:
                     )
                     return response.text or ""
                 except Exception as err:  # noqa: BLE001
-                    logger.warning("Gemini model %s failed: %s; trying next fallback", model_name, err)
-                    last_err = err
+                    err_str = str(err)
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        logger.warning("Gemini quota exhausted; circuit-breaking to Groq for remaining calls.")
+                        _GEMINI_QUOTA_EXHAUSTED = True
+                    else:
+                        logger.warning("Gemini model %s failed: %s; falling back to Groq", self.model, err)
 
-            # Fast cross-provider fallback to Groq if available
+            # Fast cross-provider fallback to Groq with multi-model rotation to avoid 30 RPM limits
             groq_key = os.getenv("GROQ_API_KEY")
             if groq_key:
-                try:
-                    from groq import Groq
+                from groq import Groq
 
-                    g_client = Groq(api_key=groq_key)
-                    completion = g_client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
-                        messages=[
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=self.temperature,
-                    )
-                    return completion.choices[0].message.content or ""
-                except Exception as groq_err:  # noqa: BLE001
-                    logger.warning("Groq fallback also failed: %s", groq_err)
+                g_client = Groq(api_key=groq_key)
+                start_idx = _GROQ_CALL_COUNTER % len(_GROQ_MODELS)
+                _GROQ_CALL_COUNTER += 1
+                ordered_models = list(_GROQ_MODELS[start_idx:]) + list(_GROQ_MODELS[:start_idx])
+                for g_model in ordered_models:
+                    try:
+                        completion = g_client.chat.completions.create(
+                            model=g_model,
+                            messages=[
+                                {"role": "system", "content": system},
+                                {"role": "user", "content": prompt},
+                            ],
+                            temperature=self.temperature,
+                        )
+                        return completion.choices[0].message.content or ""
+                    except Exception as groq_err:  # noqa: BLE001
+                        logger.warning("Groq model %s failed: %s; trying next model", g_model, groq_err)
 
-            logger.error("All Gemini model attempts failed: %s", last_err)
-            raise last_err
+            raise RuntimeError("Both Gemini and Groq providers failed or exhausted rate limits.")
 
         elif self.provider == "groq":
             from groq import Groq
@@ -279,6 +304,7 @@ def answer_with_citations(
     temperature: float = 0.0,
     cache_dir: str | Path = "data/cache/llm_cache",
     api_key: str | None = None,
+    system_prompt: str = SYSTEM_INSTRUCTION,
 ) -> GenerationResult:
     """Format prompt, query LLM, and return result with cited provenance."""
     prompt = format_prompt(question, sources)
@@ -289,7 +315,10 @@ def answer_with_citations(
         cache_dir=cache_dir,
         api_key=api_key,
     )
-    answer_text, cached, latency_s = client.generate(prompt)
+    from ragcite.citations import normalize_citation_brackets
+
+    answer_text, cached, latency_s = client.generate(prompt, system=system_prompt)
+    answer_text = normalize_citation_brackets(answer_text)
 
     return GenerationResult(
         question=question,

@@ -11,14 +11,18 @@ import re
 from dataclasses import dataclass, field
 
 _CITE_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
-_SENT_RE = re.compile(r"(?<=[.!?।])\s+(?=[A-Z0-9\"'(\[\u0900-\u097f])")
+_SENT_RE = re.compile(r"(?<!\b\d\.)(?<=[.!?।])\s+(?=[A-Z\"'(\u0900-\u097f])")
+_DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 
 REFUSAL_PHRASES = [
     "do not contain sufficient information",
     "does not contain sufficient information",
     "not enough information in the provided sources",
+    "cannot answer this question",
+    "not mentioned in the provided sources",
     "पर्याप्त जानकारी उपलब्ध छैन",
     "उल्लेख गरिएको छैन",
+    "जानकारी छैन",
 ]
 
 
@@ -41,13 +45,39 @@ def is_refusal(answer: str) -> bool:
     return any(p in lower or p in answer for p in REFUSAL_PHRASES)
 
 
+def normalize_citation_brackets(text: str) -> str:
+    """Normalize full-width brackets 【1】 and Devanagari numerals [१] into standard [1]."""
+    cleaned = text.replace("【", "[").replace("】", "]")
+    return re.sub(
+        r"\[([0-9०-९,\s]+)\]",
+        lambda m: f"[{m.group(1).translate(_DEVANAGARI_DIGITS)}]",
+        cleaned,
+    )
+
+
 def split_sentences(answer: str) -> list[str]:
     """Sentence splitter handling both English punctuation (. ! ?) and Devanagari purna viram (।)."""
-    normalized = answer.strip()
+    normalized = normalize_citation_brackets(answer.strip())
     if not normalized:
         return []
+    # Attach trailing citations placed after sentence-ending punctuation (e.g. "text. [1]" or "पाठ। [1]")
+    normalized = re.sub(
+        r"([.!?।])\s*((?:\[\d+(?:\s*,\s*\d+)*\]\s*)+)",
+        r" \2\1 ",
+        normalized,
+    )
     parts = _SENT_RE.split(normalized)
-    return [s.strip() for s in parts if s.strip()]
+    out: list[str] = []
+    for s in parts:
+        cleaned = s.strip()
+        if not cleaned:
+            continue
+        # Ignore bare list markers like "1." or "(a)"
+        stripped_claim = _CITE_RE.sub("", cleaned).strip(" .!?।-•*()0123456789")
+        if len(stripped_claim) < 3:
+            continue
+        out.append(cleaned)
+    return out
 
 
 def parse_citations(answer: str) -> list[CitedSentence]:

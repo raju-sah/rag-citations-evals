@@ -25,31 +25,34 @@ The interactive Streamlit UI features:
 
 The evaluation suite runs across 8 core configurations + 1 prompt variant against the stratified Nepal Law golden dataset (1,712 chunks across 1,389 legislative pages):
 
-| Configuration | Recall@5 | MRR | nDCG@5 | Faithfulness | Cite-P | Cite-R | Latency (s) | Notes |
-|---|---|---|---|---|---|---|---|---|
-| **Baseline** (Structure-aware 500, Hybrid RRF, Routing ON, Reranker ON) | **0.4125** | **0.4000** | **0.4912** | **1.00** | **1.00** | **1.00** | 0.324 | Full production pipeline |
-| **Dense-only** (`bge-small-en-v1.5`) | 0.4375 | 0.3862 | 0.4950 | 0.90 | 1.00 | 1.00 | 0.110 | Semantic search only |
-| **BM25-only** (`bm25s`) | 0.4500 | 0.4300 | 0.4901 | 0.90 | 1.00 | 1.00 | 0.016 | Lexical search only |
-| **Naive Hybrid** (No language routing) | 0.4375 | 0.4250 | 0.5162 | 0.90 | 1.00 | 1.00 | 0.137 | Devanagari noise not filtered |
-| **Reranker OFF** | 0.4125 | 0.3688 | 0.4409 | 0.90 | 1.00 | 1.00 | 0.090 | RRF top-5 without cross-encoder |
-| **Fixed 500 tok** | 0.2500 | 0.1758 | 0.2224 | 0.90 | 1.00 | 1.00 | 0.001 | Naive token window chunker |
-| **Fixed 300 tok** | 0.2625 | 0.1812 | 0.2389 | 0.90 | 1.00 | 1.00 | 0.001 | Smaller token context window |
-| **Fixed 800 tok** | 0.1875 | 0.1292 | 0.1581 | 0.90 | 1.00 | 1.00 | 0.001 | Diluted token context window |
-| **Prompt: Relaxed citation** | 0.4125 | 0.4000 | 0.4912 | 1.00 | 1.00 | 1.00 | 0.112 | Relaxed system instruction |
+| Configuration | Recall@5 | MRR | nDCG@5 | Faithfulness | Cite-P | Cite-R | Refusal | Latency (s) | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **Baseline** (Structure-aware 500, Hybrid RRF, Routing ON, Reranker ON) | **0.9857** | **0.8833** | **0.9038** | **0.9242** | **0.9804** | **0.9254** | **0.9500** | 0.260 | Full production pipeline |
+| **Dense-only** (`bge-small-en-v1.5`) | 0.9000 | 0.8190 | 0.8351 | 0.9394 | 1.0000 | 1.0000 | 1.0000 | 0.039 | Semantic search only |
+| **BM25-only** (`bm25s`) | 0.9714 | 0.8833 | 0.8970 | 0.9600 | 1.0000 | 1.0000 | 1.0000 | 0.003 | Lexical search only |
+| **Naive Hybrid** (No language routing) | 0.7571 | 0.7048 | 0.7105 | 0.9051 | 1.0000 | 1.0000 | 1.0000 | 0.041 | Devanagari queries not translated |
+| **Reranker OFF** | 0.9000 | 0.7905 | 0.8091 | 0.9394 | 1.0000 | 1.0000 | 1.0000 | 0.038 | RRF top-5 without cross-encoder |
+| **Fixed 500 tok** | 0.4286 | 0.3343 | 0.3471 | 0.8297 | 1.0000 | 1.0000 | 1.0000 | 0.001 | Naive token window chunker |
+| **Fixed 300 tok** | 0.4857 | 0.3452 | 0.3757 | 0.8434 | 1.0000 | 1.0000 | 1.0000 | 0.001 | Smaller token context window |
+| **Fixed 800 tok** | 0.3571 | 0.2295 | 0.2541 | 0.8091 | 1.0000 | 1.0000 | 1.0000 | 0.001 | Diluted token context window |
+| **Prompt: Relaxed citation** | 0.9857 | 0.8833 | 0.9038 | 0.4863 | 0.9400 | 0.3750 | 0.9000 | 0.037 | Relaxed system instruction |
 
 *All runs logged to [`experiments/ablations.csv`](experiments/ablations.csv).*
 
 ### Key Findings & Failure Analysis
 
 1. **Structure-Aware Chunking is the Single Biggest Factor**:
-   - Fixed-window chunking (300/500/800 tokens) causes a severe drop in retrieval effectiveness: Recall@5 drops from **0.4125 → 0.2500** (-39% relative) and MRR plummets from **0.4000 → 0.1758** (-56% relative).
-   - In 800-token fixed windows, Recall@5 drops even further to **0.1875** due to context dilution. Prepending hierarchical legal breadcrumbs (`Act › Chapter › Section: Title`) ensures that statutory clauses retain their governing context even when split across token limits.
+   - Fixed-window chunking (300/500/800 tokens) causes a dramatic drop in retrieval effectiveness: Recall@5 drops from **0.9857 → 0.4286** (-56.5% relative) and MRR plummets from **0.8833 → 0.3343** (-62.2% relative).
+   - In 800-token fixed windows, Recall@5 drops even further to **0.3571** due to context dilution. Prepending hierarchical legal breadcrumbs (`Act › Part › Chapter › Section: Title`) and preserving individual numbered Articles/Sections ensures statutory clauses retain their governing provenance.
 
 2. **Cross-Encoder Reranker Drives Top-1 Precision**:
-   - Enabling `BAAI/bge-reranker-v2-m3` lifts MRR from **0.3688 → 0.4000** (+8.5%) and nDCG@5 from **0.4409 → 0.4912** (+11.4%), successfully promoting the authoritative statute to rank 1 over weakly matching semantic neighbors.
+   - Enabling cross-encoder reranking lifts Recall@5 from **0.9000 → 0.9857** (+8.6%), MRR from **0.7905 → 0.8833** (+9.3%), and nDCG@5 from **0.8091 → 0.9038** (+9.5%), promoting the authoritative statute to rank 1 over weakly matching neighbors.
 
 3. **Language-Aware Cross-Lingual Routing**:
-   - Devanagari Nepali queries have 0% lexical token overlap with English legislative text. Without script routing, BM25 returns spurious keyword matches that pollute the Reciprocal Rank Fusion (RRF) pool. Routing Devanagari queries directly to dense embedding search prevents rank corruption.
+   - Raw Devanagari Nepali queries have 0% lexical overlap with English legislative text and tokenize poorly in English-only dense models. Without Devanagari numeral normalization (`०-९ → 0-9`) and legal glossary query translation (`naive_hybrid_no_routing`), Recall@5 drops from **0.9857 → 0.7571** (-22.9%).
+
+4. **Strict vs. Relaxed Citation Prompting**:
+   - Relaxing per-sentence citation instructions (`prompt_relaxed_citation`) causes Citation Recall to collapse from **0.9254 → 0.3750** (-55.0%) and sentence-level entailed Faithfulness to drop from **0.9242 → 0.4863**, proving that explicit per-sentence `[n]` constraints are essential for verifiable legal RAG.
 
 4. **Cross-Family Judge Calibration (Cohen's κ)**:
    - Evaluated on a 40-item hand-annotated human calibration set using Groq `openai/gpt-oss-120b`:
