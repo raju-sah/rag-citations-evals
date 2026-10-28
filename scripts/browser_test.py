@@ -59,7 +59,7 @@ def run_browser_tests():
         print(f"  Found title: '{title_text}'")
         assert "Nepal Legal Assistant" in title_text
 
-        # Test 2: Chip Click -> Textarea Fill
+        # Test 2: Chip Click -> Textarea Fill & Submit Button Enabled
         print("\n--- Test 2: Chip Click & Textarea Population ---")
         q1_button = page.locator("button:has-text('What freedoms are guaranteed')")
         assert q1_button.count() > 0, "First suggestion chip not found!"
@@ -75,20 +75,21 @@ def run_browser_tests():
         print(f"  Textarea content: '{current_val[:60]}...'")
         assert "Article 17" in current_val, "Textarea did not populate from chip!"
 
-        # Test 3: Clear Question Button
-        print("\n--- Test 3: Clear Question Button ---")
-        clear_btn = page.locator("button:has-text('Clear Question')")
-        assert clear_btn.count() > 0, "Clear Question button not found!"
-        print("  Clicking 'Clear Question'...")
-        clear_btn.click()
-        time.sleep(2)
-        check_no_exceptions("After Clear Question Click")
+        # Check embedded submit button inside textarea
+        submit_btn = page.locator("button[data-testid='stChatInputSubmitButton']")
+        assert submit_btn.count() > 0, "Embedded submit button inside textarea not found!"
+        assert not submit_btn.is_disabled(), "Submit button should be enabled when text is present!"
+        print("  ✓ Embedded submit button inside textarea is visible and enabled.")
 
-        cleared_val = textarea.input_value()
-        print(f"  Textarea content after clear: '{cleared_val}'")
-        assert cleared_val == "", f"Expected empty textarea, got '{cleared_val}'"
+        # Test 3: Verify External Buttons Removed
+        print("\n--- Test 3: Verify External Buttons Removed ---")
+        old_run_btn = page.locator("button:has-text('Run RAG Pipeline')")
+        old_clear_btn = page.locator("button:has-text('Clear Question')")
+        assert old_run_btn.count() == 0, "Old 'Run RAG Pipeline' button still present!"
+        assert old_clear_btn.count() == 0, "Old 'Clear Question' button still present!"
+        print("  ✓ Confirmed: External 'Run RAG Pipeline' and 'Clear Question' buttons removed.")
 
-        # Test 4: Chip Click for Nepali Query & Execution
+        # Test 4: Chip Click for Nepali Query & Execution via Embedded Submit Button
         print("\n--- Test 4: Nepali Query Selection & Pipeline Execution ---")
         nepali_chip = page.locator("button:has-text('नेपालको संविधानको धारा १६')")
         assert nepali_chip.count() > 0, "Nepali suggestion chip not found!"
@@ -97,9 +98,9 @@ def run_browser_tests():
         time.sleep(2)
         check_no_exceptions("After Nepali Chip Click")
 
-        run_btn = page.locator("button:has-text('Run RAG Pipeline')")
-        print("  Clicking 'Run RAG Pipeline'...")
-        run_btn.click()
+        print("  Clicking embedded submit button inside textarea...")
+        submit_btn = page.locator("button[data-testid='stChatInputSubmitButton']")
+        submit_btn.click()
 
         # Wait for RAG pipeline to complete and render status badge
         print("  Waiting for RAG response...")
@@ -140,7 +141,7 @@ def run_browser_tests():
         assert df_elem.count() > 0, "Dataframe not found in Tab 2!"
         print("  ✓ Ablations dataframe rendered successfully.")
 
-        # Test 6: English Query & Refusal Verification
+        # Test 6: English Query & Refusal Verification via Embedded Submit Button
         print("\n--- Test 6: Switch back to Tab 1 & Refusal Query Execution ---")
         tab_buttons.first.click()
         time.sleep(1)
@@ -153,9 +154,9 @@ def run_browser_tests():
         unans_chip.first.click()
         time.sleep(2)
 
-        print("  Clicking 'Run RAG Pipeline' for refusal test...")
-        run_btn = page.locator("button:has-text('Run RAG Pipeline')")
-        run_btn.click()
+        print("  Clicking embedded submit button inside textarea for refusal test...")
+        submit_btn = page.locator("button[data-testid='stChatInputSubmitButton']")
+        submit_btn.click()
         print("  Waiting for refusal response and validation badge...")
         page.wait_for_selector(".status-pill-ok, .status-pill-warn", timeout=45000)
         time.sleep(1)

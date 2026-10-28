@@ -61,6 +61,43 @@ st.markdown(
         display: inline-block;
         margin-bottom: 12px;
     }
+    /* Claude-style embedded chat input */
+    div[data-testid="stChatInput"] {
+        border-radius: 18px !important;
+        border: 1.5px solid rgba(255, 255, 255, 0.15) !important;
+        background-color: rgba(30, 30, 36, 0.75) !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25) !important;
+        padding: 4px 8px !important;
+        margin-bottom: 12px !important;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    div[data-testid="stChatInput"]:focus-within {
+        border-color: #d97706 !important;
+        box-shadow: 0 4px 24px rgba(217, 119, 6, 0.25) !important;
+    }
+    div[data-testid="stChatInput"] textarea {
+        font-size: 1.02rem !important;
+        line-height: 1.5 !important;
+    }
+    div[data-testid="stChatInput"] button[data-testid="stChatInputSubmitButton"] {
+        background-color: #d97706 !important;
+        color: white !important;
+        border-radius: 50% !important;
+        width: 34px !important;
+        height: 34px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: transform 0.15s ease, background-color 0.15s ease !important;
+    }
+    div[data-testid="stChatInput"] button[data-testid="stChatInputSubmitButton"]:hover:not(:disabled) {
+        background-color: #f59e0b !important;
+        transform: scale(1.06) !important;
+    }
+    div[data-testid="stChatInput"] button[data-testid="stChatInputSubmitButton"]:disabled {
+        background-color: rgba(255, 255, 255, 0.1) !important;
+        color: rgba(255, 255, 255, 0.25) !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -120,29 +157,33 @@ with tab_qa:
         "What does the Constitution of Nepal state regarding the licensing of cryptocurrency exchanges and token staking?",
     ]
 
-    # Initialize query state
-    if "query_text" not in st.session_state:
-        st.session_state["query_text"] = ""
+    # Initialize query and result state
+    if "query_input_val" not in st.session_state:
+        st.session_state["query_input_val"] = ""
+    if "last_result" not in st.session_state:
+        st.session_state["last_result"] = None
 
     def apply_chip():
         chosen = st.session_state.get("chip_selection")
         if chosen:
-            st.session_state["query_text"] = chosen
+            st.session_state["query_input_val"] = chosen
 
-    def clear_query():
-        st.session_state["query_text"] = ""
-        st.session_state["chip_selection"] = None
+    retriever = get_retriever()
+    if retriever is None:
+        st.warning(
+            "⚠️ Retrieval indexes not yet found in `data/index/`. "
+            "Please ensure `data/processed/chunks.jsonl` is indexed."
+        )
 
-    # Expanding textarea for long or multi-clause legal questions
-    query_input = st.text_area(
-        "Enter your legal question:",
-        key="query_text",
-        height=100,
-        placeholder="Type or paste any legal query in English or Nepali (field expands for long questions)...",
-        help="Text area expands automatically when questions are long.",
-    )
+    # Embedded input container with submit button inside the textarea
+    with st.container():
+        submitted_query = st.chat_input(
+            "Enter your legal question in English or Nepali...",
+            key="query_input_val",
+            disabled=(retriever is None),
+        )
 
-    # Chip-style example questions below the textarea
+    # Chip-style example questions below the input field
     st.markdown("💡 **Suggested questions (click to fill):**")
     st.pills(
         "Suggested questions",
@@ -153,28 +194,11 @@ with tab_qa:
         wrap=True,
     )
 
-    retriever = get_retriever()
-    if retriever is None:
-        st.warning(
-            "⚠️ Retrieval indexes not yet found in `data/index/`. "
-            "Please ensure `data/processed/chunks.jsonl` is indexed."
-        )
-
-    btn_col1, btn_col2 = st.columns([1, 4])
-    with btn_col1:
-        run_submitted = st.button(
-            "Run RAG Pipeline",
-            type="primary",
-            disabled=(retriever is None or not query_input.strip()),
-        )
-    with btn_col2:
-        st.button("Clear Question", on_click=clear_query)
-
-    if run_submitted:
+    if submitted_query:
         with st.spinner("Retrieving candidates & generating cited answer..."):
             # 1. Retrieve
             candidates = retriever.retrieve(
-                query=query_input,
+                query=submitted_query,
                 top_k=top_k_candidates,
                 mode=retrieval_mode,
                 route_devanagari=route_devanagari,
@@ -183,7 +207,7 @@ with tab_qa:
             # 2. Rerank
             if reranker_enabled and candidates:
                 final_sources = rerank(
-                    query=query_input,
+                    query=submitted_query,
                     candidates=candidates,
                     top_k=final_k,
                 )
@@ -192,12 +216,28 @@ with tab_qa:
 
             # 3. Generate with citations
             gen_result = answer_with_citations(
-                question=query_input,
+                question=submitted_query,
                 sources=final_sources,
             )
 
             # 4. Structural validation
             val_report = validate_citations(gen_result.answer, num_sources=len(final_sources))
+
+            st.session_state["last_result"] = {
+                "question": submitted_query,
+                "candidates": candidates,
+                "final_sources": final_sources,
+                "gen_result": gen_result,
+                "val_report": val_report,
+            }
+
+    # Render results if available
+    if st.session_state.get("last_result") is not None:
+        res = st.session_state["last_result"]
+        candidates = res["candidates"]
+        final_sources = res["final_sources"]
+        gen_result = res["gen_result"]
+        val_report = res["val_report"]
 
         # Render citation validation status
         if val_report["is_refusal"]:
