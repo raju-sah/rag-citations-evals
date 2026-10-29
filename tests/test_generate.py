@@ -41,9 +41,9 @@ def test_llm_client_caching():
     with tempfile.TemporaryDirectory() as tmp_dir:
         client = LLMClient(
             provider="gemini",
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             cache_dir=tmp_dir,
-            api_key=None,  # triggers fallback mock
+            api_key="",  # triggers fallback mock without network call
         )
         prompt = "Test prompt"
         ans1, cached1, _ = client.generate(prompt)
@@ -63,7 +63,7 @@ def test_answer_with_citations():
             "What rights exist?",
             sources,
             cache_dir=tmp_dir,
-            api_key=None,
+            api_key="",
         )
         assert result.question == "What rights exist?"
         assert len(result.sources) == 2

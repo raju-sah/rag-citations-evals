@@ -141,7 +141,7 @@ class LLMClient:
     def __init__(
         self,
         provider: str = "gemini",
-        model: str = "gemini-3-flash-preview",
+        model: str = "gemini-3.8-flash",
         temperature: float = 0.0,
         cache_dir: str | Path = "data/cache/llm_cache",
         api_key: str | None = None,
@@ -151,7 +151,7 @@ class LLMClient:
         self.temperature = temperature
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.api_key = api_key or self._resolve_api_key()
+        self.api_key = api_key if api_key is not None else self._resolve_api_key()
 
     def _resolve_api_key(self) -> str | None:
         if self.provider == "gemini":
@@ -184,23 +184,22 @@ class LLMClient:
         response_text = self._call_provider(prompt, system=system)
         duration_s = time.perf_counter() - start_time
 
-        # Save to disk cache only if real API key was used
-        if self.api_key:
-            try:
-                with open(cache_file, "w", encoding="utf-8") as f:
-                    json.dump(
-                        {
-                            "provider": self.provider,
-                            "model": self.model,
-                            "prompt": prompt,
-                            "text": response_text,
-                            "latency_s": duration_s,
-                        },
-                        f,
-                        ensure_ascii=False,
-                    )
-            except OSError as err:
-                logger.warning("Failed to write LLM cache: %s", err)
+        # Save to disk cache
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "provider": self.provider,
+                        "model": self.model,
+                        "prompt": prompt,
+                        "text": response_text,
+                        "latency_s": duration_s,
+                    },
+                    f,
+                    ensure_ascii=False,
+                )
+        except OSError as err:
+            logger.warning("Failed to write LLM cache: %s", err)
 
         return response_text, False, duration_s
 
@@ -326,7 +325,7 @@ def answer_with_citations(
     question: str,
     sources: Sequence[RetrievedCandidate],
     provider: str = "gemini",
-    model: str = "gemini-3-flash-preview",
+    model: str = "gemini-3.8-flash",
     temperature: float = 0.0,
     cache_dir: str | Path = "data/cache/llm_cache",
     api_key: str | None = None,
