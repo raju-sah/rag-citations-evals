@@ -28,9 +28,28 @@ _GEMINI_QUOTA_EXHAUSTED = False
 _GROQ_MODELS = (
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
     "qwen/qwen3.8-27b",
 )
 _GROQ_CALL_COUNTER = 0
+
+
+def _get_secret(key: str) -> str | None:
+    """Retrieve an API secret from environment variables or Streamlit secrets."""
+    val = os.getenv(key)
+    if val and val.strip():
+        return val.strip()
+    try:
+        import streamlit as st
+
+        if hasattr(st, "secrets") and key in st.secrets:
+            s_val = st.secrets[key]
+            if isinstance(s_val, str) and s_val.strip():
+                return s_val.strip()
+    except Exception:  # noqa: BLE001, S110
+        pass
+    return None
 
 _GREETING_PATTERNS = re.compile(
     r"^\s*(?:hi|hello|hey|hi\s+there|hello\s+there|hey\s+there|namaste|namaskar|"
@@ -138,11 +157,11 @@ class LLMClient:
 
     def _resolve_api_key(self) -> str | None:
         if self.provider == "gemini":
-            return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            return _get_secret("GEMINI_API_KEY") or _get_secret("GOOGLE_API_KEY")
         elif self.provider == "groq":
-            return os.getenv("GROQ_API_KEY")
+            return _get_secret("GROQ_API_KEY")
         elif self.provider == "openai":
-            return os.getenv("OPENAI_API_KEY")
+            return _get_secret("OPENAI_API_KEY")
         return None
 
     def _cache_key(self, prompt: str, system: str = SYSTEM_INSTRUCTION) -> str:
@@ -199,32 +218,36 @@ class LLMClient:
             )
 
         if self.provider == "gemini":
+            last_gemini_err = None
             if not _GEMINI_QUOTA_EXHAUSTED:
                 from google import genai
                 from google.genai import types
 
-                client = genai.Client(api_key=self.api_key)
-                try:
-                    response = client.models.generate_content(
-                        model=self.model,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system,
-                            temperature=self.temperature,
-                            thinking_config=types.ThinkingConfig(thinking_budget=0),
-                        ),
-                    )
-                    return response.text or ""
-                except Exception as err:  # noqa: BLE001
-                    err_str = str(err)
-                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                        logger.warning("Gemini quota exhausted; circuit-breaking to Groq for remaining calls.")
-                        _GEMINI_QUOTA_EXHAUSTED = True
-                    else:
-                        logger.warning("Gemini model %s failed: %s; falling back to Groq", self.model, err)
+                gemini_key = self.api_key or _get_secret("GEMINI_API_KEY") or _get_secret("GOOGLE_API_KEY")
+                if gemini_key:
+                    client = genai.Client(api_key=gemini_key)
+                    try:
+                        response = client.models.generate_content(
+                            model=self.model,
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                system_instruction=system,
+                                temperature=self.temperature,
+                                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                            ),
+                        )
+                        return response.text or ""
+                    except Exception as err:  # noqa: BLE001
+                        last_gemini_err = str(err)
+                        if "429" in last_gemini_err or "RESOURCE_EXHAUSTED" in last_gemini_err:
+                            logger.warning("Gemini quota exhausted; circuit-breaking to Groq for remaining calls.")
+                            _GEMINI_QUOTA_EXHAUSTED = True
+                        else:
+                            logger.warning("Gemini model %s failed: %s; falling back to Groq", self.model, err)
 
             # Fast cross-provider fallback to Groq with multi-model rotation to avoid 30 RPM limits
-            groq_key = os.getenv("GROQ_API_KEY")
+            groq_key = _get_secret("GROQ_API_KEY")
+            last_groq_err = None
             if groq_key:
                 from groq import Groq
 
@@ -244,9 +267,14 @@ class LLMClient:
                         )
                         return completion.choices[0].message.content or ""
                     except Exception as groq_err:  # noqa: BLE001
+                        last_groq_err = str(groq_err)
                         logger.warning("Groq model %s failed: %s; trying next model", g_model, groq_err)
 
-            raise RuntimeError("Both Gemini and Groq providers failed or exhausted rate limits.")
+            raise RuntimeError(
+                f"Both Gemini and Groq providers failed or exhausted rate limits. "
+                f"Gemini: {last_gemini_err or 'No key or quota exhausted'}. "
+                f"Groq: {last_groq_err or ('No GROQ_API_KEY found' if not groq_key else 'All models failed')}."
+            )
 
         elif self.provider == "groq":
             from groq import Groq

@@ -27,8 +27,8 @@ load_dotenv()
 # Propagate Streamlit Cloud secrets to os.environ for backend modules
 with contextlib.suppress(Exception):
     for _k, _v in st.secrets.items():
-        if isinstance(_v, str) and _k not in os.environ:
-            os.environ[_k] = _v
+        if isinstance(_v, str) and _v.strip():
+            os.environ[_k] = _v.strip()
 
 from ragcite.citations import validate_citations
 from ragcite.generate import (
