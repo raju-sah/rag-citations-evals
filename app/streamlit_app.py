@@ -371,10 +371,34 @@ with tab_qa:
                     final_sources = candidates[:final_k]
 
                 # 3. Generate with citations
-                gen_result = answer_with_citations(
-                    question=submitted_query,
-                    sources=final_sources,
-                )
+                try:
+                    gen_result = answer_with_citations(
+                        question=submitted_query,
+                        sources=final_sources,
+                    )
+                except Exception as err:  # noqa: BLE001
+                    st.error(
+                        f"⚠️ **LLM Authentication / API Key Error:**\n\n`{err}`\n\n"
+                        "Please verify your keys in **App Settings → Secrets**:\n"
+                        "- **`GEMINI_API_KEY`**: Obtain from [Google AI Studio](https://aistudio.google.com/apikey) (starts with `AIzaSy...`).\n"
+                        "- **`GROQ_API_KEY`**: Obtain from [Groq Console](https://console.groq.com/keys) (starts with `gsk_...`)."
+                    )
+                    gen_result = GenerationResult(
+                        question=submitted_query,
+                        answer=(
+                            f"Could not generate cited answer due to an API authentication error with the LLM provider.\n\n"
+                            f"**Diagnostic Error:** `{err}`\n\n"
+                            f"Please update your keys in Streamlit Cloud under **App Settings → Secrets**:\n"
+                            f"1. `GEMINI_API_KEY = \"AIzaSy...\"` (from https://aistudio.google.com/apikey)\n"
+                            f"2. `GROQ_API_KEY = \"gsk_...\"` (from https://console.groq.com/keys)"
+                        ),
+                        sources=final_sources,
+                        model="error-fallback",
+                        provider="local",
+                        cached=False,
+                        latency_s=time.perf_counter() - t_pipeline_start,
+                        prompt="",
+                    )
 
                 # 4. Structural validation
                 val_report = validate_citations(gen_result.answer, num_sources=len(final_sources))
