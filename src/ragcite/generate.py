@@ -28,8 +28,6 @@ _GEMINI_QUOTA_EXHAUSTED = False
 _GROQ_MODELS = (
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
     "qwen/qwen3.8-27b",
 )
 _GROQ_CALL_COUNTER = 0
@@ -239,8 +237,8 @@ class LLMClient:
                         return response.text or ""
                     except Exception as err:  # noqa: BLE001
                         last_gemini_err = str(err)
-                        if "429" in last_gemini_err or "RESOURCE_EXHAUSTED" in last_gemini_err:
-                            logger.warning("Gemini quota exhausted; circuit-breaking to Groq for remaining calls.")
+                        if "429" in last_gemini_err or "RESOURCE_EXHAUSTED" in last_gemini_err or "quota" in last_gemini_err.lower() or "503" in last_gemini_err:
+                            logger.warning("Gemini quota or 503 unavailable; circuit-breaking to Groq for remaining calls.")
                             _GEMINI_QUOTA_EXHAUSTED = True
                         else:
                             logger.warning("Gemini model %s failed: %s; falling back to Groq", self.model, err)
