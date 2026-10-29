@@ -2,6 +2,7 @@ streamlit>=1.35.0
 faiss-cpu
 sentence-transformers
 bm25s
+pypdf
 google-genai
 groq
 openai
