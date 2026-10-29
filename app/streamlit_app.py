@@ -6,6 +6,7 @@ Tab 2: Ablations & Evaluation Dashboard rendering experiments/ablations.csv.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import os
 import re
 import sys
@@ -17,6 +18,12 @@ _repo_root = Path(__file__).resolve().parent.parent
 _src_dir = _repo_root / "src"
 if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
+
+# Force reload child modules so cloud instances always run the latest commit
+for _mod_name in list(sys.modules.keys()):
+    if _mod_name.startswith("ragcite"):
+        with contextlib.suppress(Exception):
+            importlib.reload(sys.modules[_mod_name])
 
 import pandas as pd
 import streamlit as st
